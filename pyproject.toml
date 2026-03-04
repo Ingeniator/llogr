@@ -1,0 +1,24 @@
+[project]
+name = "llogr"
+version = "0.1.0"
+description = "Langfuse-compatible LLM log collector"
+readme = "README.md"
+authors = [
+    { name = "MironovSergei", email = "waityourletters@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.135.1",
+    "uvicorn[standard]>=0.41.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "locust>=2.43.3",
+    "pytest>=9.0.2",
+]
