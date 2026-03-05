@@ -1,0 +1,67 @@
+from __future__ import annotations
+
+import logging
+import os
+from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
+
+import yaml
+
+logger = logging.getLogger(__name__)
+
+
+def _find_config() -> Path:
+    if env := os.environ.get("LLOGR_CONFIG"):
+        return Path(env)
+    # In editable installs: two levels up from src/llogr/config.py
+    src_relative = Path(__file__).resolve().parents[2] / "config.yaml"
+    if src_relative.exists():
+        return src_relative
+    # Fallback: CWD (works in Docker where config.yaml is in /app)
+    return Path("config.yaml")
+
+
+CONFIG_PATH = _find_config()
+
+
+@dataclass(frozen=True)
+class S3Config:
+    bucket: str
+    region: str
+    endpoint: str | None
+    access_key_id: str
+    secret_access_key: str
+    public_endpoint: str | None = None
+
+
+@dataclass(frozen=True)
+class ClickbeatConfig:
+    api_url: str
+    api_key: str
+
+
+@dataclass(frozen=True)
+class ServerConfig:
+    root_path: str = ""
+
+
+@dataclass(frozen=True)
+class Settings:
+    s3: S3Config
+    clickbeat: ClickbeatConfig
+    server: ServerConfig = ServerConfig()
+
+
+def load_config(path: str | Path) -> Settings:
+    raw = yaml.safe_load(Path(path).read_text())
+    return Settings(
+        s3=S3Config(**raw["s3"]),
+        clickbeat=ClickbeatConfig(**raw["clickbeat"]),
+        server=ServerConfig(**raw.get("server", {})),
+    )
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return load_config(CONFIG_PATH)

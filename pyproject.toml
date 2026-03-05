@@ -10,6 +10,9 @@ requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.135.1",
     "uvicorn[standard]>=0.41.0",
+    "aioboto3>=13.0.0",
+    "httpx>=0.28.1",
+    "prometheus-fastapi-instrumentator>=7.0.0",
 ]
 
 [build-system]
@@ -21,4 +24,7 @@ dev = [
     "httpx>=0.28.1",
     "locust>=2.43.3",
     "pytest>=9.0.2",
+    "moto[s3]>=5.0.0",
+    "pytest-asyncio>=0.25.0",
+    "respx>=0.22.0",
 ]

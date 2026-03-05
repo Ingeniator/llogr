@@ -1,4 +1,4 @@
-.PHONY: dev test lint perf perf-ui
+.PHONY: dev test lint perf perf-ui up up-seed down seed
 
 dev:
 	uv run uvicorn llogr.main:app --reload
@@ -28,3 +28,15 @@ perf:
 
 perf-ui:
 	uv run locust -f tests/locustfile.py --host http://localhost:8000
+
+up:
+	docker compose up -d --build
+
+up-seed:
+	docker compose --profile seed up -d --build
+
+down:
+	docker compose --profile seed down
+
+seed:
+	uv run python scripts/seed.py

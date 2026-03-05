@@ -1,0 +1,9 @@
+s3:
+  bucket: "llogr-raw-events"
+  region: "us-east-1"
+  endpoint: "http://localhost:9000"
+  access_key_id: "minioadmin"
+  secret_access_key: "minioadmin"
+clickbeat:
+  api_url: "https://api.clickbeat.example.com/v1/events"
+  api_key: "YOUR_API_KEY"

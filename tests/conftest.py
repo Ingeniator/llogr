@@ -1,4 +1,5 @@
 import base64
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -8,7 +9,9 @@ from llogr.main import app
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app)
+    with patch("llogr.routes.ingestion.stage1_save_raw", new_callable=AsyncMock) as mock_s1, \
+         patch("llogr.routes.ingestion.stage2_forward_to_clickbeat", new_callable=AsyncMock) as mock_s2:
+        yield TestClient(app)
 
 
 @pytest.fixture

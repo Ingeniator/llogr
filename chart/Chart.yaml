@@ -1,0 +1,6 @@
+apiVersion: v2
+name: llogr
+description: Langfuse-compatible LLM log collector
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

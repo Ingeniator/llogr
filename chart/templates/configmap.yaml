@@ -1,0 +1,19 @@
+{{- if not .Values.existingSecret }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "llogr.fullname" . }}
+  labels:
+    {{- include "llogr.labels" . | nindent 4 }}
+stringData:
+  config.yaml: |
+    s3:
+      bucket: {{ .Values.config.s3.bucket | quote }}
+      region: {{ .Values.config.s3.region | quote }}
+      endpoint: {{ .Values.config.s3.endpoint | default "null" }}
+      access_key_id: {{ .Values.config.s3.access_key_id | quote }}
+      secret_access_key: {{ .Values.config.s3.secret_access_key | quote }}
+    clickbeat:
+      api_url: {{ .Values.config.clickbeat.api_url | quote }}
+      api_key: {{ .Values.config.clickbeat.api_key | quote }}
+{{- end }}
