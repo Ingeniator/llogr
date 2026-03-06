@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import logging
-
 from fastapi import FastAPI
 from prometheus_fastapi_instrumentator import Instrumentator
 from prometheus_fastapi_instrumentator.metrics import latency, request_size, requests, response_size
@@ -10,8 +8,6 @@ from llogr.config import get_settings
 from llogr.routes.ingestion import router as ingestion_router
 from llogr.routes.logs import router as logs_router
 from llogr.routes.ui import router as ui_router
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 settings = get_settings()
 app = FastAPI(title="llogr", version="0.1.0", root_path=settings.server.root_path)

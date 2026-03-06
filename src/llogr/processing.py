@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import logging
+import structlog
 
 from llogr.auth import AuthContext
 from llogr.clickbeat import send_to_clickbeat
@@ -9,7 +9,7 @@ from llogr.metrics import EVENTS_INGESTED
 from llogr.models import IngestionEvent
 from llogr.s3 import save_batch_to_s3
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 async def stage1_save_raw(
@@ -18,13 +18,13 @@ async def stage1_save_raw(
     settings = get_settings()
     key = await save_batch_to_s3(batch, auth, settings, session_id=session_id)
     EVENTS_INGESTED.labels(project_id=auth.public_key).inc(len(batch))
-    logger.info("Stage 1 complete: saved %d events to %s", len(batch), key)
+    logger.info("stage_1_complete", events=len(batch), key=key)
 
 
 async def stage2_forward_to_clickbeat(batch: list[IngestionEvent], auth: AuthContext) -> None:
     settings = get_settings()
     try:
         await send_to_clickbeat(batch, auth, settings)
-        logger.info("Stage 2 complete: forwarded %d events to clickbeat", len(batch))
+        logger.info("stage_2_complete", events=len(batch))
     except Exception:
-        logger.exception("Stage 2 failed: error forwarding to clickbeat")
+        logger.exception("stage_2_failed")

@@ -2,19 +2,19 @@ from __future__ import annotations
 
 import hashlib
 import json
-import logging
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import aioboto3
+import structlog
 
 from llogr.auth import AuthContext
 from llogr.config import Settings
 from llogr.metrics import S3_SAVE_ERRORS, S3_SAVE_SECONDS
 from llogr.models import IngestionEvent
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 S3_KEY_TS_FORMAT = "%Y%m%dT%H%M%SZ"
 
@@ -131,7 +131,7 @@ async def save_batch_to_s3(
             S3_SAVE_ERRORS.inc()
             raise
 
-    logger.info("Saved batch to s3://%s/%s", s3_cfg.bucket, key)
+    logger.info("saved_batch_to_s3", bucket=s3_cfg.bucket, key=key)
     return key
 
 

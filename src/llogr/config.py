@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-import logging
 import os
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
+import structlog
 import yaml
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 def _find_config() -> Path:
@@ -44,6 +44,11 @@ class ClickbeatConfig:
 @dataclass(frozen=True)
 class ServerConfig:
     root_path: str = ""
+    host: str = "0.0.0.0"
+    port: int = 8000
+    workers: int = 1
+    timeout_keep_alive: int = 65
+    debug: bool = False
 
 
 @dataclass(frozen=True)

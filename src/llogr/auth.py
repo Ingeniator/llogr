@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import base64
-import logging
 from typing import NamedTuple
 
+import structlog
 from fastapi import Header, HTTPException
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class AuthContext(NamedTuple):
@@ -28,5 +28,5 @@ def get_auth(authorization: str = Header()) -> AuthContext:
     if not public_key or not secret_key:
         raise HTTPException(status_code=401, detail="Empty credentials")
 
-    logger.info("Authenticated request from %s", public_key)
+    logger.info("authenticated", public_key=public_key)
     return AuthContext(public_key=public_key, secret_key=secret_key)
