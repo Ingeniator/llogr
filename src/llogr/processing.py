@@ -33,13 +33,13 @@ async def ingest(batch: list[IngestionEvent], auth: AuthContext, session_id: str
         except Exception:
             logger.exception("store_clickhouse_failed")
 
-    if "clickbeat" in backends and settings.clickbeat.api_url:
+    if "clickstream" in backends and settings.clickstream.api_url:
         try:
-            from llogr.clickbeat import send_to_clickbeat
-            await send_to_clickbeat(batch, auth, settings)
-            stored_to.append("clickbeat")
+            from llogr.clickstream import send_to_clickstream
+            await send_to_clickstream(batch, auth, settings)
+            stored_to.append("clickstream")
         except Exception:
-            logger.exception("store_clickbeat_failed")
+            logger.exception("store_clickstream_failed")
 
     EVENTS_INGESTED.labels(project_id=auth.public_key).inc(len(batch))
     logger.info("ingest_complete", events=len(batch), targets=stored_to)

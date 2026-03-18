@@ -38,19 +38,6 @@ async def search(
 
     backend = settings.features.search_backend
 
-    if backend == "clickbeat":
-        from llogr.clickbeat import search_via_clickbeat
-
-        results = await search_via_clickbeat(
-            query=q,
-            project_id=auth.public_key,
-            settings=settings,
-            start=start, end=end,
-            session_id=session_id, trace_id=trace_id,
-            limit=limit,
-        )
-        return {"results": results, "backend": "clickbeat"}
-
     if backend == "clickhouse":
         from llogr.clickhouse import search_logs_ch
 

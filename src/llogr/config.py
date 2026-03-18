@@ -14,11 +14,9 @@ logger = structlog.get_logger(__name__)
 def _find_config() -> Path:
     if env := os.environ.get("LLOGR_CONFIG"):
         return Path(env)
-    # In editable installs: two levels up from src/llogr/config.py
     src_relative = Path(__file__).resolve().parents[2] / "config.yaml"
     if src_relative.exists():
         return src_relative
-    # Fallback: CWD (works in Docker where config.yaml is in /app)
     return Path("config.yaml")
 
 
@@ -36,10 +34,9 @@ class S3Config:
 
 
 @dataclass(frozen=True)
-class ClickbeatConfig:
-    api_url: str
-    api_key: str
-    query_url: str = ""  # e.g. http://clickbeat:9999/v1/query
+class ClickstreamConfig:
+    api_url: str = ""       # POST /2/httpapi (Amplitude format)
+    api_key: str = ""
 
 
 @dataclass(frozen=True)
@@ -53,12 +50,12 @@ class ClickHouseConfig:
 
 @dataclass(frozen=True)
 class FeaturesConfig:
-    # Store backends — where to forward events after S3 (S3 is always on)
-    # Any combination of: "clickhouse", "clickbeat"
-    store_backends: tuple[str, ...] = ()
+    # Store backends — where to send events on ingestion
+    # Any combination of: "s3", "clickhouse", "clickstream"
+    store_backends: tuple[str, ...] = ("s3",)
     # Search
     search_enabled: bool = False
-    search_backend: str = "duckdb"  # "duckdb", "clickhouse", or "clickbeat"
+    search_backend: str = "duckdb"  # "duckdb" or "clickhouse"
 
 
 @dataclass(frozen=True)
@@ -74,7 +71,7 @@ class ServerConfig:
 @dataclass(frozen=True)
 class Settings:
     s3: S3Config
-    clickbeat: ClickbeatConfig
+    clickstream: ClickstreamConfig = ClickstreamConfig()
     server: ServerConfig = ServerConfig()
     features: FeaturesConfig = FeaturesConfig()
     clickhouse: ClickHouseConfig = ClickHouseConfig()
@@ -84,11 +81,11 @@ def load_config(path: str | Path) -> Settings:
     raw = yaml.safe_load(Path(path).read_text())
     return Settings(
         s3=S3Config(**raw["s3"]),
-        clickbeat=ClickbeatConfig(**raw["clickbeat"]),
+        clickstream=ClickstreamConfig(**raw.get("clickstream", {})),
         server=ServerConfig(**raw.get("server", {})),
         features=FeaturesConfig(**{
             **raw.get("features", {}),
-            "store_backends": tuple(raw.get("features", {}).get("store_backends", ())),
+            "store_backends": tuple(raw.get("features", {}).get("store_backends", ("s3",))),
         }),
         clickhouse=ClickHouseConfig(**raw.get("clickhouse", {})),
     )

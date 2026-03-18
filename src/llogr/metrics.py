@@ -18,12 +18,12 @@ S3_SAVE_ERRORS = Counter(
     "S3 save failures",
 )
 
-CLICKBEAT_FORWARD_SECONDS = Histogram(
-    "llogr_clickbeat_forward_seconds",
-    "Clickbeat forward latency in seconds",
+CLICKSTREAM_FORWARD_SECONDS = Histogram(
+    "llogr_clickstream_forward_seconds",
+    "Clickstream forward latency in seconds",
 )
 
-CLICKBEAT_FORWARD_ERRORS = Counter(
-    "llogr_clickbeat_forward_errors_total",
-    "Clickbeat forward failures",
+CLICKSTREAM_FORWARD_ERRORS = Counter(
+    "llogr_clickstream_forward_errors_total",
+    "Clickstream forward failures",
 )

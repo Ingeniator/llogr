@@ -9,7 +9,7 @@ A lightweight FastAPI service that acts as a drop-in replacement for Langfuse's 
 ```bash
 uv sync
 make dev
-```
+```wede3fferc
 
 The server starts at `http://localhost:8000`.
 
