@@ -1,0 +1,22 @@
+s3:
+  bucket: "llogr-raw-events"
+  region: "us-east-1"
+  endpoint: "http://minio:9000"
+  public_endpoint: "http://localhost:8888/s3"
+  access_key_id: "minioadmin"
+  secret_access_key: "minioadmin"
+clickbeat:
+  api_url: "http://localhost:9999/noop"
+  api_key: "unused"
+server:
+  root_path: "/llogr"
+features:
+  search_enabled: true
+  search_backend: "clickhouse"
+clickhouse:
+  url: "http://clickhouse:8123"
+  enabled: true
+  database: "default"
+  table: "llogr_events"
+  user: "default"
+  password: "clickhouse"

@@ -29,9 +29,9 @@ HTML = """\
   table { width: 100%; border-collapse: collapse; font-size: .85rem; }
   th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #eee; }
   th { background: #f9fafb; font-weight: 600; }
+  td.truncate { max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #status { margin: 10px 0; font-size: .85rem; color: #666; }
   #urls { margin-top: 12px; }
-  #urls a { display: block; word-break: break-all; margin: 4px 0; font-size: .85rem; }
   .actions { display: flex; gap: 8px; margin-top: 12px; }
   .btn-sm { padding: 4px 10px; font-size: .8rem; }
   .time-picker { position: relative; }
@@ -56,10 +56,11 @@ HTML = """\
   .modal-close:hover { color: #333; }
   .modal-body { overflow: auto; padding: 16px; flex: 1; }
   .modal-body pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-size: .82rem; line-height: 1.5; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: .75rem; font-weight: 500; background: #e0e7ff; color: #3730a3; margin-left: 8px; }
 </style>
 </head>
 <body>
-<h1>llogr — log browser</h1>
+<h1>llogr — log browser <span class="badge" id="modeBadge"></span></h1>
 
 <div class="card">
   <div class="row">
@@ -99,35 +100,24 @@ HTML = """\
     </div>
     <div><label>Session ID</label><input type="text" id="f_session"></div>
     <div><label>Trace ID</label><input type="text" id="f_trace"></div>
-    <div><label>Trace Type</label><input type="text" id="f_tracetype"></div>
-    <div><label>Input Hash</label><input type="text" id="f_hash"></div>
+    <!-- S3 mode only filters -->
+    <div id="filterTraceType"><label>Trace Type</label><input type="text" id="f_tracetype"></div>
+    <div id="filterInputHash"><label>Input Hash</label><input type="text" id="f_hash"></div>
   </div>
-  <div class="actions">
-    <button class="btn-primary" onclick="loadLogs()">Search</button>
+  <div class="row" style="margin-top:8px" id="searchRow">
+    <div style="flex:3"><label>Search</label><input type="text" id="f_query" placeholder="Search inside log content..."></div>
   </div>
+  <div class="actions" id="actionButtons"></div>
 </div>
 
 <div id="status"></div>
 
 <div class="card" id="results" style="display:none">
   <table>
-    <thead>
-      <tr>
-        <th><input type="checkbox" id="selectAll" onchange="toggleAll(this)"></th>
-        <th>Timestamp</th>
-        <th>Session ID</th>
-        <th>Trace ID</th>
-        <th>Trace Type</th>
-        <th>Input Hash</th>
-        <th></th>
-      </tr>
-    </thead>
+    <thead id="thead"></thead>
     <tbody id="tbody"></tbody>
   </table>
-  <div class="actions">
-    <button class="btn-primary" onclick="getUrls()">Download catalog</button>
-    <button class="btn-secondary" onclick="getIndex()">Download index</button>
-  </div>
+  <div class="actions" id="resultActions"></div>
   <div id="urls"></div>
 </div>
 
@@ -135,75 +125,243 @@ HTML = """\
 
 <script>
 const BASE = '{{BASE_PATH}}';
+let uiMode = 's3'; // 's3' or 'events'
+let searchBackend = null;
+let currentEvents = []; // for events mode — holds loaded data
 let timePreset = '24h';
 let customFrom = null, customTo = null;
 
 const PRESETS = {
-  '15m': 15*60*1000,
-  '1h': 60*60*1000,
-  '4h': 4*60*60*1000,
-  '24h': 24*60*60*1000,
-  '7d': 7*24*60*60*1000,
-  '30d': 30*24*60*60*1000,
+  '15m': 15*60*1000, '1h': 60*60*1000, '4h': 4*60*60*1000,
+  '24h': 24*60*60*1000, '7d': 7*24*60*60*1000, '30d': 30*24*60*60*1000,
   'all': null,
 };
 
-function toggleTimeDropdown() {
-  document.getElementById('timeDropdown').classList.toggle('open');
-}
-
+// ── Time picker ──
+function toggleTimeDropdown() { document.getElementById('timeDropdown').classList.toggle('open'); }
 function setPreset(key, label) {
-  timePreset = key;
-  customFrom = null; customTo = null;
+  timePreset = key; customFrom = null; customTo = null;
   document.getElementById('timeLabel').textContent = label;
   document.querySelectorAll('#timePresets div').forEach(d => d.classList.remove('active'));
   event.target.classList.add('active');
   document.getElementById('timeDropdown').classList.remove('open');
 }
-
 function applyCustomRange() {
   const from = document.getElementById('time_from').value;
   const to = document.getElementById('time_to').value;
   if (!from || !to) return;
-  customFrom = new Date(from).toISOString();
-  customTo = new Date(to).toISOString();
+  customFrom = new Date(from).toISOString(); customTo = new Date(to).toISOString();
   timePreset = null;
-  document.getElementById('timeLabel').textContent = from.replace('T',' ') + '  \u2192  ' + to.replace('T',' ');
+  document.getElementById('timeLabel').textContent = from.replace('T',' ') + '  \\u2192  ' + to.replace('T',' ');
   document.querySelectorAll('#timePresets div').forEach(d => d.classList.remove('active'));
   document.getElementById('timeDropdown').classList.remove('open');
 }
-
 function getTimeRange() {
   if (customFrom && customTo) return { start: customFrom, end: customTo };
-  const ms = PRESETS[timePreset];
-  if (!ms) return {};
+  const ms = PRESETS[timePreset]; if (!ms) return {};
   const now = new Date();
   return { start: new Date(now - ms).toISOString(), end: now.toISOString() };
 }
-
-document.addEventListener('click', function(e) {
+document.addEventListener('click', e => {
   const picker = document.getElementById('timePicker');
   if (!picker.contains(e.target)) document.getElementById('timeDropdown').classList.remove('open');
 });
 
-function authHeader() {
-  return 'Basic ' + btoa(document.getElementById('pk').value + ':' + document.getElementById('sk').value);
+// ── Auth ──
+function authHeader() { return 'Basic ' + btoa(document.getElementById('pk').value + ':' + document.getElementById('sk').value); }
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+// ── Init: detect mode ──
+async function init() {
+  try {
+    const resp = await fetch(BASE + '/api/public/ui-config');
+    if (resp.ok) {
+      const cfg = await resp.json();
+      if (cfg.search_enabled && (cfg.search_backend === 'clickhouse' || cfg.search_backend === 'clickbeat')) {
+        uiMode = 'events';
+        searchBackend = cfg.search_backend;
+      } else if (cfg.search_enabled) {
+        searchBackend = cfg.search_backend;
+      }
+    }
+  } catch {}
+  renderMode();
 }
 
-async function loadLogs() {
-  const status = document.getElementById('status');
-  status.textContent = 'Loading...';
-  document.getElementById('urls').innerHTML = '';
+function renderMode() {
+  const badge = document.getElementById('modeBadge');
+  const actions = document.getElementById('actionButtons');
+  const s3Filters = uiMode === 's3';
+
+  document.getElementById('filterTraceType').style.display = s3Filters ? '' : 'none';
+  document.getElementById('filterInputHash').style.display = s3Filters ? '' : 'none';
+
+  if (uiMode === 'events') {
+    badge.textContent = searchBackend;
+    document.getElementById('searchRow').style.display = '';
+    actions.innerHTML =
+      '<button class="btn-primary" onclick="searchEvents()">Search</button>' +
+      '<button class="btn-secondary" onclick="listEvents()">List recent</button>';
+  } else {
+    badge.textContent = 's3';
+    document.getElementById('searchRow').style.display = searchBackend ? '' : 'none';
+    let btns = '<button class="btn-primary" onclick="loadLogs()">List files</button>';
+    if (searchBackend) btns += '<button class="btn-primary" onclick="fullTextSearch()">Full-text search</button>';
+    actions.innerHTML = btns;
+  }
+}
+
+// ══════════════════════════════════════════
+//  EVENTS MODE (ClickHouse / ClickBeat)
+// ══════════════════════════════════════════
+
+function searchParams() {
   const params = new URLSearchParams();
   const range = getTimeRange();
   if (range.start) params.set('start', range.start);
   if (range.end) params.set('end', range.end);
   const s = document.getElementById('f_session').value.trim();
   const t = document.getElementById('f_trace').value.trim();
-  const tt = document.getElementById('f_tracetype').value.trim();
-  const h = document.getElementById('f_hash').value.trim();
   if (s) params.set('session_id', s);
   if (t) params.set('trace_id', t);
+  return params;
+}
+
+async function searchEvents() {
+  const q = document.getElementById('f_query').value.trim();
+  if (!q) return;
+  const status = document.getElementById('status');
+  status.textContent = 'Searching...';
+  const params = searchParams();
+  params.set('q', q);
+  params.set('limit', '100');
+  try {
+    const resp = await fetch(BASE + '/api/public/logs/search?' + params, {
+      headers: { 'Authorization': authHeader() }
+    });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    currentEvents = data.results;
+    renderEventsTable(currentEvents);
+    status.textContent = currentEvents.length + ' event(s) found [' + (data.backend || searchBackend) + ']';
+  } catch (e) { status.textContent = 'Error: ' + e.message; }
+}
+
+async function listEvents() {
+  const status = document.getElementById('status');
+  status.textContent = 'Loading...';
+  const params = searchParams();
+  params.set('q', '*');
+  params.set('limit', '100');
+  try {
+    const resp = await fetch(BASE + '/api/public/logs/search?' + params, {
+      headers: { 'Authorization': authHeader() }
+    });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    currentEvents = data.results;
+    renderEventsTable(currentEvents);
+    status.textContent = currentEvents.length + ' event(s) [' + (data.backend || searchBackend) + ']';
+  } catch (e) { status.textContent = 'Error: ' + e.message; }
+}
+
+function inputPreview(body) {
+  if (!body || !body.input) return '-';
+  const inp = body.input;
+  if (inp.messages && inp.messages.length) {
+    const last = inp.messages[inp.messages.length - 1];
+    return (last.content || '').substring(0, 80);
+  }
+  if (typeof inp === 'string') return inp.substring(0, 80);
+  return JSON.stringify(inp).substring(0, 80);
+}
+
+function outputPreview(body) {
+  if (!body || !body.output) return '-';
+  const out = body.output;
+  if (out.choices && out.choices.length) {
+    const msg = out.choices[0].message;
+    return msg ? (msg.content || '').substring(0, 80) : '-';
+  }
+  if (out.content) return out.content.substring(0, 80);
+  if (typeof out === 'string') return out.substring(0, 80);
+  return '-';
+}
+
+function renderEventsTable(events) {
+  const thead = document.getElementById('thead');
+  thead.innerHTML = '<tr><th><input type="checkbox" id="selectAll" onchange="toggleAll(this)"></th>' +
+    '<th>Timestamp</th><th>Model</th><th>Input</th><th>Output</th><th>Type</th><th></th></tr>';
+
+  const tbody = document.getElementById('tbody');
+  tbody.innerHTML = '';
+  document.getElementById('results').style.display = events.length ? '' : 'none';
+
+  const resultActions = document.getElementById('resultActions');
+  resultActions.innerHTML =
+    '<button class="btn-secondary" onclick="exportEventsDataset()">Export as dataset</button>' +
+    '<button class="btn-secondary" onclick="downloadEventsJson()">Download JSON</button>';
+
+  events.forEach((ev, i) => {
+    const b = ev.body || {};
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td><input type="checkbox" class="sel" data-idx="' + i + '"></td>' +
+      '<td>' + esc(ev.timestamp || '') + '</td>' +
+      '<td>' + esc(b.model || '-') + '</td>' +
+      '<td class="truncate" title="' + esc(inputPreview(b)) + '">' + esc(inputPreview(b)) + '</td>' +
+      '<td class="truncate" title="' + esc(outputPreview(b)) + '">' + esc(outputPreview(b)) + '</td>' +
+      '<td>' + esc(ev.type || '-') + '</td>' +
+      '<td><button class="btn-secondary btn-sm" onclick="previewEvent(' + i + ')">Preview</button></td>';
+    tbody.appendChild(tr);
+  });
+}
+
+function previewEvent(idx) {
+  const ev = currentEvents[idx];
+  const json = JSON.stringify(ev, null, 2);
+  showModal(ev.id || 'Event', json);
+}
+
+function selectedEventIndices() {
+  return [...document.querySelectorAll('.sel:checked')].map(c => parseInt(c.dataset.idx));
+}
+
+function getSelectedEvents() {
+  const indices = selectedEventIndices();
+  if (indices.length) return indices.map(i => currentEvents[i]);
+  return currentEvents; // all if none selected
+}
+
+function downloadEventsJson() {
+  const events = getSelectedEvents();
+  if (!events.length) return;
+  downloadFile(JSON.stringify(events, null, 2), 'events.json', 'application/json');
+  document.getElementById('urls').textContent = 'Downloaded ' + events.length + ' event(s).';
+}
+
+function exportEventsDataset() {
+  const events = getSelectedEvents();
+  const dataset = eventsToDataset(events);
+  if (!dataset.length) {
+    document.getElementById('urls').textContent = 'No valid conversations found.';
+    return;
+  }
+  downloadFile(JSON.stringify(dataset, null, 2), 'dataset.json', 'application/json');
+  document.getElementById('urls').textContent = 'Exported ' + dataset.length + ' conversation(s) as dataset.';
+}
+
+// ══════════════════════════════════════════
+//  S3 MODE (file-based, DuckDB)
+// ══════════════════════════════════════════
+
+async function loadLogs() {
+  const status = document.getElementById('status');
+  status.textContent = 'Loading...';
+  document.getElementById('urls').innerHTML = '';
+  const params = searchParams();
+  const tt = document.getElementById('f_tracetype').value.trim();
+  const h = document.getElementById('f_hash').value.trim();
   if (tt) params.set('trace_type', tt);
   if (h) params.set('input_hash', h);
   try {
@@ -212,17 +370,26 @@ async function loadLogs() {
     });
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const data = await resp.json();
-    renderTable(data.files);
-    status.textContent = data.files.length + ' batch(es) found';
-  } catch (e) {
-    status.textContent = 'Error: ' + e.message;
-  }
+    renderFilesTable(data.files);
+    status.textContent = data.files.length + ' batch(es) found [s3]';
+  } catch (e) { status.textContent = 'Error: ' + e.message; }
 }
 
-function renderTable(files) {
+function renderFilesTable(files) {
+  const thead = document.getElementById('thead');
+  thead.innerHTML = '<tr><th><input type="checkbox" id="selectAll" onchange="toggleAll(this)"></th>' +
+    '<th>Timestamp</th><th>Session ID</th><th>Trace ID</th><th>Trace Type</th><th>Input Hash</th><th></th></tr>';
+
   const tbody = document.getElementById('tbody');
   tbody.innerHTML = '';
   document.getElementById('results').style.display = files.length ? '' : 'none';
+
+  const resultActions = document.getElementById('resultActions');
+  resultActions.innerHTML =
+    '<button class="btn-primary" onclick="getUrls()">Download catalog</button>' +
+    '<button class="btn-secondary" onclick="getIndex()">Download index</button>' +
+    '<button class="btn-secondary" onclick="getDataset()">Export as dataset</button>';
+
   files.forEach(f => {
     const tr = document.createElement('tr');
     tr.innerHTML =
@@ -232,56 +399,69 @@ function renderTable(files) {
       '<td>' + esc(f.trace_id) + '</td>' +
       '<td>' + esc(f.trace_type) + '</td>' +
       '<td>' + esc(f.input_hash) + '</td>' +
-      '<td><button class="btn-secondary btn-sm" onclick="preview(this)" data-key="' + f.key.replace(/"/g, '&quot;') + '">Preview</button></td>';
+      '<td><button class="btn-secondary btn-sm" onclick="previewFile(this)" data-key="' + f.key.replace(/"/g, '&quot;') + '">Preview</button></td>';
     tbody.appendChild(tr);
   });
 }
 
-function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+async function fullTextSearch() {
+  const q = document.getElementById('f_query').value.trim();
+  if (!q) return;
+  const status = document.getElementById('status');
+  status.textContent = 'Searching...';
+  const params = searchParams();
+  params.set('q', q);
+  try {
+    const resp = await fetch(BASE + '/api/public/logs/search?' + params, {
+      headers: { 'Authorization': authHeader() }
+    });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    // Render as events table since DuckDB returns events
+    currentEvents = data.results;
+    renderEventsTable(currentEvents);
+    status.textContent = data.results.length + ' result(s) across ' + (data.files_scanned || '?') + ' file(s) [duckdb]';
+  } catch (e) { status.textContent = 'Error: ' + e.message; }
+}
 
-function toggleAll(master) {
-  document.querySelectorAll('.sel').forEach(c => c.checked = master.checked);
+// ── S3 file actions ──
+function toggleAll(master) { document.querySelectorAll('.sel').forEach(c => c.checked = master.checked); }
+
+async function fetchFileEvents(keys) {
+  const resp = await fetch(BASE + '/api/public/logs/urls', {
+    method: 'POST',
+    headers: { 'Authorization': authHeader(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ keys })
+  });
+  if (!resp.ok) throw new Error('HTTP ' + resp.status);
+  const data = await resp.json();
+  const all = [];
+  for (const f of data.files) {
+    const r = await fetch(f.url);
+    if (!r.ok) throw new Error('Failed to fetch ' + f.key);
+    const text = await r.text();
+    all.push(...text.trim().split('\\n').map(line => JSON.parse(line)));
+  }
+  return all;
 }
 
 async function getUrls() {
   const keys = [...document.querySelectorAll('.sel:checked')].map(c => c.value);
   if (!keys.length) return;
   const urlsDiv = document.getElementById('urls');
-  urlsDiv.textContent = 'Fetching ' + keys.length + ' file(s)...';
+  urlsDiv.textContent = 'Fetching...';
   try {
-    const resp = await fetch(BASE + '/api/public/logs/urls', {
-      method: 'POST',
-      headers: { 'Authorization': authHeader(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ keys })
-    });
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    const data = await resp.json();
-    const all = [];
-    for (const f of data.files) {
-      const r = await fetch(f.url);
-      if (!r.ok) throw new Error('Failed to fetch ' + f.key);
-      const text = await r.text();
-      const events = text.trim().split('\\n').map(line => JSON.parse(line));
-      all.push(...events);
-    }
-    const blob = new Blob([JSON.stringify(all, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'catalog.json';
-    a.click();
-    URL.revokeObjectURL(url);
-    urlsDiv.textContent = 'Downloaded ' + all.length + ' event(s).';
-  } catch (e) {
-    urlsDiv.textContent = 'Error: ' + e.message;
-  }
+    const events = await fetchFileEvents(keys);
+    downloadFile(JSON.stringify(events, null, 2), 'catalog.json', 'application/json');
+    urlsDiv.textContent = 'Downloaded ' + events.length + ' event(s).';
+  } catch (e) { urlsDiv.textContent = 'Error: ' + e.message; }
 }
 
 async function getIndex() {
   const keys = [...document.querySelectorAll('.sel:checked')].map(c => c.value);
   if (!keys.length) return;
   const urlsDiv = document.getElementById('urls');
-  urlsDiv.textContent = 'Fetching URLs for ' + keys.length + ' file(s)...';
+  urlsDiv.textContent = 'Fetching URLs...';
   try {
     const resp = await fetch(BASE + '/api/public/logs/urls', {
       method: 'POST',
@@ -291,49 +471,83 @@ async function getIndex() {
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const data = await resp.json();
     const lines = data.files.map(f => JSON.stringify({ url: f.url }));
-    const blob = new Blob([lines.join('\\n') + '\\n'], { type: 'application/x-ndjson' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'index.jsonl';
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadFile(lines.join('\\n') + '\\n', 'index.jsonl', 'application/x-ndjson');
     urlsDiv.textContent = 'Downloaded index with ' + data.files.length + ' file(s).';
+  } catch (e) { urlsDiv.textContent = 'Error: ' + e.message; }
+}
+
+async function getDataset() {
+  const keys = [...document.querySelectorAll('.sel:checked')].map(c => c.value);
+  if (!keys.length) return;
+  const urlsDiv = document.getElementById('urls');
+  urlsDiv.textContent = 'Building dataset...';
+  try {
+    const events = await fetchFileEvents(keys);
+    const dataset = eventsToDataset(events);
+    if (!dataset.length) { urlsDiv.textContent = 'No valid conversations found.'; return; }
+    downloadFile(JSON.stringify(dataset, null, 2), 'dataset.json', 'application/json');
+    urlsDiv.textContent = 'Exported ' + dataset.length + ' conversation(s) as dataset.';
+  } catch (e) { urlsDiv.textContent = 'Error: ' + e.message; }
+}
+
+async function previewFile(btn) {
+  const key = btn.dataset.key;
+  showModal(key, 'Loading...');
+  try {
+    const events = await fetchFileEvents([key]);
+    document.querySelector('.modal-body pre').textContent = JSON.stringify(events, null, 2);
   } catch (e) {
-    urlsDiv.textContent = 'Error: ' + e.message;
+    document.querySelector('.modal-body pre').textContent = 'Error: ' + e.message;
   }
 }
 
-async function preview(btn) {
-  const key = btn.dataset.key;
+// ══════════════════════════════════════════
+//  Shared helpers
+// ══════════════════════════════════════════
+
+function eventsToDataset(events) {
+  const dataset = [];
+  for (const ev of events) {
+    const b = ev.body || ev;
+    const msgs = [];
+    const inp = b.input;
+    if (inp && inp.messages && Array.isArray(inp.messages)) {
+      for (const m of inp.messages) { if (m.role && m.content) msgs.push({ role: m.role, content: m.content }); }
+    } else if (Array.isArray(inp)) {
+      for (const m of inp) { if (m.role && m.content) msgs.push({ role: m.role, content: m.content }); }
+    }
+    const out = b.output;
+    if (out && out.choices && out.choices.length) {
+      const msg = out.choices[0].message;
+      if (msg && msg.role && msg.content) msgs.push({ role: msg.role, content: msg.content });
+    } else if (out && out.role && out.content) {
+      msgs.push({ role: out.role, content: out.content });
+    }
+    if (msgs.length >= 2) dataset.push({ messages: msgs });
+  }
+  return dataset;
+}
+
+function downloadFile(content, filename, type) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function showModal(title, content) {
   const modal = document.getElementById('modal');
   modal.innerHTML =
     '<div class="modal-overlay" onclick="if(event.target===this)closeModal()">' +
-    '<div class="modal"><div class="modal-header"><h2>' + esc(key) + '</h2>' +
+    '<div class="modal"><div class="modal-header"><h2>' + esc(title) + '</h2>' +
     '<button class="modal-close" onclick="closeModal()">&times;</button></div>' +
-    '<div class="modal-body"><pre>Loading...</pre></div></div></div>';
-  try {
-    const resp = await fetch(BASE + '/api/public/logs/urls', {
-      method: 'POST',
-      headers: { 'Authorization': authHeader(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ keys: [key] })
-    });
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    const data = await resp.json();
-    if (!data.files.length) throw new Error('No URL returned');
-    const content = await fetch(data.files[0].url);
-    if (!content.ok) throw new Error('HTTP ' + content.status);
-    const text = await content.text();
-    const json = text.trim().split('\\n').map(line => JSON.parse(line));
-    modal.querySelector('pre').textContent = JSON.stringify(json, null, 2);
-  } catch (e) {
-    modal.querySelector('pre').textContent = 'Error: ' + e.message;
-  }
+    '<div class="modal-body"><pre>' + esc(content) + '</pre></div></div></div>';
 }
 
-function closeModal() {
-  document.getElementById('modal').innerHTML = '';
-}
+function closeModal() { document.getElementById('modal').innerHTML = ''; }
+
+// Boot
+init();
 </script>
 </body>
 </html>
