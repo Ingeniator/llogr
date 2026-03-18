@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timezone
 
 import structlog
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, Request
+from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import Response
 
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
@@ -17,7 +17,7 @@ from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
 
 from llogr.auth import AuthContext, get_auth
 from llogr.models import IngestionEvent
-from llogr.processing import stage1_save_raw, stage2_forward
+from llogr.processing import ingest
 
 logger = structlog.get_logger(__name__)
 
@@ -135,7 +135,6 @@ def _span_to_event(span, attrs: dict[str, str]) -> IngestionEvent:
 @router.post("/api/public/otel/v1/traces")
 async def otel_ingest(
     request: Request,
-    background_tasks: BackgroundTasks,
     auth: AuthContext = Depends(get_auth),
     x_session_id: str = Header(default="none"),
 ) -> Response:
@@ -151,8 +150,7 @@ async def otel_ingest(
                 events.append(_span_to_event(span, attrs))
 
     if events:
-        await stage1_save_raw(events, auth, session_id=x_session_id)
-        background_tasks.add_task(stage2_forward, events, auth)
+        await ingest(events, auth, session_id=x_session_id)
 
     logger.info("otel_ingest", spans=len(events))
 

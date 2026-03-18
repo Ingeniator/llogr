@@ -39,14 +39,12 @@ class S3Config:
 class ClickbeatConfig:
     api_url: str
     api_key: str
-    enabled: bool = False
     query_url: str = ""  # e.g. http://clickbeat:9999/v1/query
 
 
 @dataclass(frozen=True)
 class ClickHouseConfig:
     url: str = ""
-    enabled: bool = False  # ingest events into ClickHouse
     database: str = "default"
     table: str = "llogr_events"
     user: str = "default"
@@ -55,6 +53,10 @@ class ClickHouseConfig:
 
 @dataclass(frozen=True)
 class FeaturesConfig:
+    # Store backends — where to forward events after S3 (S3 is always on)
+    # Any combination of: "clickhouse", "clickbeat"
+    store_backends: tuple[str, ...] = ()
+    # Search
     search_enabled: bool = False
     search_backend: str = "duckdb"  # "duckdb", "clickhouse", or "clickbeat"
 
@@ -84,7 +86,10 @@ def load_config(path: str | Path) -> Settings:
         s3=S3Config(**raw["s3"]),
         clickbeat=ClickbeatConfig(**raw["clickbeat"]),
         server=ServerConfig(**raw.get("server", {})),
-        features=FeaturesConfig(**raw.get("features", {})),
+        features=FeaturesConfig(**{
+            **raw.get("features", {}),
+            "store_backends": tuple(raw.get("features", {}).get("store_backends", ())),
+        }),
         clickhouse=ClickHouseConfig(**raw.get("clickhouse", {})),
     )
 

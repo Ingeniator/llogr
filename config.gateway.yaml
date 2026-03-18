@@ -6,16 +6,20 @@ s3:
   access_key_id: "minioadmin"
   secret_access_key: "minioadmin"
 clickbeat:
-  api_url: "http://localhost:9999/noop"
-  api_key: "unused"
+  api_url: "http://clickbeat:9999/v1/events"
+  api_key: "clickbeat-key"
+  query_url: "http://clickbeat:9999/v1/query"
 server:
   root_path: "/llogr"
 features:
+  store_backends:
+    - s3
+    - clickhouse
+    - clickbeat
   search_enabled: true
-  search_backend: "clickhouse"
+  search_backend: "clickbeat"
 clickhouse:
   url: "http://clickhouse:8123"
-  enabled: true
   database: "default"
   table: "llogr_events"
   user: "default"

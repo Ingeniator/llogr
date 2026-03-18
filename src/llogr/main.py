@@ -17,7 +17,11 @@ app = FastAPI(title="llogr", version="0.1.0", root_path=settings.server.root_pat
 
 @app.on_event("startup")
 async def _startup():
-    if settings.clickhouse.enabled and settings.clickhouse.url:
+    needs_ch = (
+        "clickhouse" in settings.features.store_backends
+        or settings.features.search_backend == "clickhouse"
+    )
+    if needs_ch and settings.clickhouse.url:
         from llogr.clickhouse import ensure_table
         await ensure_table(settings)
 app.include_router(ingestion_router)
