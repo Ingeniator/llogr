@@ -1,0 +1,186 @@
+# Prometheus alerting rules for llogr
+# Add to your Prometheus config:  rule_files: ["alert_rules.yml"]
+
+groups:
+  # ── HTTP Error Rate ──────────────────────────────────────────────────
+  - name: llogr_error_rate
+    rules:
+      - alert: LlogrHighErrorRate5xx
+        expr: |
+          (
+            sum(rate(http_requests_total{job="llogr", status_code=~"5.."}[5m]))
+            /
+            sum(rate(http_requests_total{job="llogr"}[5m]))
+          ) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+          service: llogr
+        annotations:
+          summary: "High 5xx error rate ({{ $value | humanizePercentage }})"
+          description: "More than 5% of llogr requests are returning 5xx errors over the last 5 minutes."
+
+      - alert: LlogrIngestionErrors
+        expr: |
+          (
+            sum(rate(http_requests_total{job="llogr", endpoint="/api/public/ingestion", status_code=~"5.."}[5m]))
+            /
+            sum(rate(http_requests_total{job="llogr", endpoint="/api/public/ingestion"}[5m]))
+          ) > 0.02
+        for: 2m
+        labels:
+          severity: critical
+          service: llogr
+        annotations:
+          summary: "Ingestion endpoint error rate elevated ({{ $value | humanizePercentage }})"
+          description: "The /api/public/ingestion endpoint has >2% 5xx rate — LLM traces are being dropped."
+
+  # ── S3 Storage Backend ──────────────────────────────────────────────
+  - name: llogr_s3
+    rules:
+      - alert: LlogrS3SaveErrors
+        expr: |
+          rate(llogr_s3_save_errors_total[5m]) > 0
+        for: 2m
+        labels:
+          severity: critical
+          service: llogr
+        annotations:
+          summary: "S3 save failures detected ({{ $value | humanize }}/s)"
+          description: "llogr is failing to persist events to S3. Data loss is occurring."
+
+      - alert: LlogrS3HighLatency
+        expr: |
+          histogram_quantile(0.95, rate(llogr_s3_save_seconds_bucket[5m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+          service: llogr
+        annotations:
+          summary: "S3 save P95 latency above 5s ({{ $value | humanizeDuration }})"
+          description: "S3 writes are slow — may cause ingestion backpressure."
+
+      - alert: LlogrS3SaveP99Latency
+        expr: |
+          histogram_quantile(0.99, rate(llogr_s3_save_seconds_bucket[5m])) > 10
+        for: 5m
+        labels:
+          severity: critical
+          service: llogr
+        annotations:
+          summary: "S3 save P99 latency above 10s"
+          description: "S3 writes are severely degraded — ingestion pipeline is likely backing up."
+
+  # ── Clickstream Forwarding ──────────────────────────────────────────
+  - name: llogr_clickstream
+    rules:
+      - alert: LlogrClickstreamForwardErrors
+        expr: |
+          rate(llogr_clickstream_forward_errors_total[5m]) > 0
+        for: 2m
+        labels:
+          severity: warning
+          service: llogr
+        annotations:
+          summary: "Clickstream forwarding failures ({{ $value | humanize }}/s)"
+          description: "Events are failing to forward to the clickstream/Amplitude backend."
+
+      - alert: LlogrClickstreamHighLatency
+        expr: |
+          histogram_quantile(0.95, rate(llogr_clickstream_forward_seconds_bucket[5m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+          service: llogr
+        annotations:
+          summary: "Clickstream forward P95 latency above 5s"
+          description: "Clickstream forwarding is slow ({{ $value | humanizeDuration }}), may delay analytics."
+
+  # ── Ingestion Volume ────────────────────────────────────────────────
+  - name: llogr_ingestion
+    rules:
+      - alert: LlogrIngestionSpike
+        expr: |
+          sum(rate(llogr_events_ingested_total[5m]))
+          > 3 * sum(rate(llogr_events_ingested_total[1h] offset 5m))
+        for: 5m
+        labels:
+          severity: warning
+          service: llogr
+        annotations:
+          summary: "Ingestion volume spike — 3x above hourly baseline"
+          description: "Event ingestion rate has tripled. Possible runaway instrumentation or replay."
+
+      - alert: LlogrNoEventsIngested
+        expr: |
+          sum(rate(llogr_events_ingested_total[10m])) == 0
+        for: 10m
+        labels:
+          severity: warning
+          service: llogr
+        annotations:
+          summary: "No events ingested for 10 minutes"
+          description: "Zero events flowing into llogr — check upstream SDK instrumentation and connectivity."
+
+  # ── Latency ─────────────────────────────────────────────────────────
+  - name: llogr_latency
+    rules:
+      - alert: LlogrHighP95Latency
+        expr: |
+          histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job="llogr"}[5m])) by (le))
+          > 5
+        for: 5m
+        labels:
+          severity: warning
+          service: llogr
+        annotations:
+          summary: "P95 latency above 5s ({{ $value | humanizeDuration }})"
+          description: "Overall llogr P95 request latency exceeds 5 seconds."
+
+      - alert: LlogrHighP99Latency
+        expr: |
+          histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{job="llogr"}[5m])) by (le))
+          > 10
+        for: 5m
+        labels:
+          severity: critical
+          service: llogr
+        annotations:
+          summary: "P99 latency above 10s"
+          description: "P99 request latency exceeds 10 seconds — possible S3/ClickHouse backend stall."
+
+  # ── Health & Availability ───────────────────────────────────────────
+  - name: llogr_health
+    rules:
+      - alert: LlogrHealthCheckFailing
+        expr: |
+          probe_success{job="llogr"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: llogr
+        annotations:
+          summary: "llogr health check failing"
+          description: "The /health endpoint has been unreachable for over 1 minute."
+
+      - alert: LlogrServiceDown
+        expr: |
+          up{job="llogr"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: llogr
+        annotations:
+          summary: "llogr instance down"
+          description: "Prometheus cannot scrape the llogr /metrics endpoint."
+
+      - alert: LlogrNoTraffic
+        expr: |
+          sum(rate(http_requests_total{job="llogr"}[5m])) == 0
+        for: 10m
+        labels:
+          severity: warning
+          service: llogr
+        annotations:
+          summary: "No HTTP traffic for 10 minutes"
+          description: "Zero requests to llogr — possible routing or upstream issue."

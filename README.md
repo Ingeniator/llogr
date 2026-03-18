@@ -38,8 +38,26 @@ langfuse = Langfuse(
 
 | Method | Path                       | Description              |
 |--------|----------------------------|--------------------------|
-| GET    | `/health`                  | Health check             |
+| GET    | `/livez`                   | Liveness probe — instant 200, no dependency checks |
+| GET    | `/ready`                   | Readiness probe — checks S3 and ClickHouse; returns 200 or 503 |
+| GET    | `/health`                  | Full health status — JSON with component details |
+| GET    | `/metrics`                 | Prometheus metrics (ingestion counts, S3/clickstream latency and errors) |
 | POST   | `/api/public/ingestion`    | Ingest events (207)      |
+
+### Kubernetes probes
+
+The Helm chart (`chart/`) is configured to use:
+- `livenessProbe` → `/livez` (restarts pod if process is stuck)
+- `readinessProbe` → `/ready` (removes pod from service if backends are down)
+
+### Alerting
+
+Prometheus alerting rules are in `devops/alerting/alert_rules.yml`:
+- Ingestion error rate and volume spikes
+- S3 save failures and latency
+- Clickstream forwarding errors
+- P95/P99 request latency
+- Health check and availability
 
 ## Development
 

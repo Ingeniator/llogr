@@ -1,0 +1,162 @@
+# SLO Recording Rules for llogr
+#
+# Targets:
+#   - Availability: 99.9% (error rate < 0.1%)
+#   - P99 latency: < 2s (ingestion should be fast)
+#   - P95 latency: < 1s
+#   - Ingestion success rate: > 99.9%
+#
+# Add to your Prometheus config:  rule_files: ["slo_rules.yml"]
+
+groups:
+  # ── Availability SLO (99.9%) ───────────────────────────────────────────
+  - name: llogr_slo_availability
+    interval: 30s
+    rules:
+      - record: llogr:slo_availability:ratio_rate5m
+        expr: |
+          1 - (
+            sum(rate(http_requests_total{job="llogr", status_code=~"5.."}[5m]))
+            /
+            sum(rate(http_requests_total{job="llogr"}[5m]))
+          )
+
+      - record: llogr:slo_availability:ratio_rate30m
+        expr: |
+          1 - (
+            sum(rate(http_requests_total{job="llogr", status_code=~"5.."}[30m]))
+            /
+            sum(rate(http_requests_total{job="llogr"}[30m]))
+          )
+
+      - record: llogr:slo_availability:ratio_rate1h
+        expr: |
+          1 - (
+            sum(rate(http_requests_total{job="llogr", status_code=~"5.."}[1h]))
+            /
+            sum(rate(http_requests_total{job="llogr"}[1h]))
+          )
+
+      - record: llogr:slo_availability:ratio_rate6h
+        expr: |
+          1 - (
+            sum(rate(http_requests_total{job="llogr", status_code=~"5.."}[6h]))
+            /
+            sum(rate(http_requests_total{job="llogr"}[6h]))
+          )
+
+      - record: llogr:slo_availability:ratio_rate24h
+        expr: |
+          1 - (
+            sum(rate(http_requests_total{job="llogr", status_code=~"5.."}[24h]))
+            /
+            sum(rate(http_requests_total{job="llogr"}[24h]))
+          )
+
+      - record: llogr:slo_availability:error_budget_remaining
+        expr: |
+          1 - (
+            (1 - llogr:slo_availability:ratio_rate24h)
+            /
+            (1 - 0.999)
+          )
+
+  # ── Latency SLO (P99 < 2s, P95 < 1s) ─────────────────────────────────
+  - name: llogr_slo_latency
+    interval: 30s
+    rules:
+      - record: llogr:slo_latency:p95_5m
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(http_request_duration_seconds_bucket{job="llogr"}[5m])) by (le)
+          )
+
+      - record: llogr:slo_latency:p99_5m
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(http_request_duration_seconds_bucket{job="llogr"}[5m])) by (le)
+          )
+
+      - record: llogr:slo_latency:p95_1h
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(http_request_duration_seconds_bucket{job="llogr"}[1h])) by (le)
+          )
+
+      - record: llogr:slo_latency:p99_1h
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(http_request_duration_seconds_bucket{job="llogr"}[1h])) by (le)
+          )
+
+      # Fraction of requests completing within 2s
+      - record: llogr:slo_latency:ratio_rate5m
+        expr: |
+          sum(rate(http_request_duration_seconds_bucket{job="llogr", le="2"}[5m]))
+          /
+          sum(rate(http_request_duration_seconds_count{job="llogr"}[5m]))
+
+      - record: llogr:slo_latency:ratio_rate1h
+        expr: |
+          sum(rate(http_request_duration_seconds_bucket{job="llogr", le="2"}[1h]))
+          /
+          sum(rate(http_request_duration_seconds_count{job="llogr"}[1h]))
+
+      - record: llogr:slo_latency:ratio_rate24h
+        expr: |
+          sum(rate(http_request_duration_seconds_bucket{job="llogr", le="2"}[24h]))
+          /
+          sum(rate(http_request_duration_seconds_count{job="llogr"}[24h]))
+
+  # ── Ingestion SLO (99.9% success) ─────────────────────────────────────
+  - name: llogr_slo_ingestion
+    interval: 30s
+    rules:
+      # Ingestion endpoint availability (separate from overall)
+      - record: llogr:slo_ingestion:ratio_rate5m
+        expr: |
+          1 - (
+            sum(rate(http_requests_total{job="llogr", endpoint="/api/public/ingestion", status_code=~"5.."}[5m]))
+            /
+            sum(rate(http_requests_total{job="llogr", endpoint="/api/public/ingestion"}[5m]))
+          )
+
+      - record: llogr:slo_ingestion:ratio_rate1h
+        expr: |
+          1 - (
+            sum(rate(http_requests_total{job="llogr", endpoint="/api/public/ingestion", status_code=~"5.."}[1h]))
+            /
+            sum(rate(http_requests_total{job="llogr", endpoint="/api/public/ingestion"}[1h]))
+          )
+
+      - record: llogr:slo_ingestion:ratio_rate24h
+        expr: |
+          1 - (
+            sum(rate(http_requests_total{job="llogr", endpoint="/api/public/ingestion", status_code=~"5.."}[24h]))
+            /
+            sum(rate(http_requests_total{job="llogr", endpoint="/api/public/ingestion"}[24h]))
+          )
+
+      # Events ingested per hour
+      - record: llogr:ingestion:events_rate1h
+        expr: |
+          sum(rate(llogr_events_ingested_total[1h])) * 3600
+
+      # S3 save error ratio
+      - record: llogr:slo_s3:error_ratio_rate1h
+        expr: |
+          sum(rate(llogr_s3_save_errors_total[1h]))
+          /
+          sum(rate(llogr_events_ingested_total[1h]))
+
+  # ── Request Volume ────────────────────────────────────────────────────
+  - name: llogr_slo_throughput
+    interval: 30s
+    rules:
+      - record: llogr:throughput:rate5m
+        expr: |
+          sum(rate(http_requests_total{job="llogr"}[5m]))
+
+      - record: llogr:throughput:rate1h
+        expr: |
+          sum(rate(http_requests_total{job="llogr"}[1h]))
