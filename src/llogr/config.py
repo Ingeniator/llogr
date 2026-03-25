@@ -78,7 +78,7 @@ class Settings:
 
 
 def load_config(path: str | Path) -> Settings:
-    raw = yaml.safe_load(Path(path).read_text())
+    raw = yaml.safe_load(os.path.expandvars(Path(path).read_text()))
     return Settings(
         s3=S3Config(**raw["s3"]),
         clickstream=ClickstreamConfig(**raw.get("clickstream", {})),
