@@ -21,6 +21,45 @@ def _find_config() -> Path:
 
 
 CONFIG_PATH = _find_config()
+VAULT_SECRETS_PATH = os.environ.get("VAULT_SECRETS_PATH", "/vault/secrets/env")
+
+
+def _load_vault_secrets(path: str | Path) -> dict[str, str]:
+    """Load secrets from a vault sidecar file.
+
+    Supported formats (auto-detected):
+        KEY=value
+        export KEY=value
+        KEY: value
+    """
+    p = Path(path)
+    if not p.exists():
+        return {}
+    secrets = {}
+    for line in p.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:]
+        if ": " in line:
+            key, _, value = line.partition(": ")
+        elif "=" in line:
+            key, _, value = line.partition("=")
+        else:
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+            value = value[1:-1]
+        secrets[key.strip()] = value
+    return secrets
+
+
+def _resolve_vault_refs(text: str, secrets: dict[str, str]) -> str:
+    """Replace vault:KEY references with values from the vault secrets file."""
+    for key, value in secrets.items():
+        text = text.replace(f"vault:{key}", value)
+    return text
 
 
 @dataclass(frozen=True)
@@ -78,7 +117,10 @@ class Settings:
 
 
 def load_config(path: str | Path) -> Settings:
-    raw = yaml.safe_load(os.path.expandvars(Path(path).read_text()))
+    text = Path(path).read_text()
+    text = _resolve_vault_refs(text, _load_vault_secrets(VAULT_SECRETS_PATH))
+    text = os.path.expandvars(text)
+    raw = yaml.safe_load(text)
     return Settings(
         s3=S3Config(**raw["s3"]),
         clickstream=ClickstreamConfig(**raw.get("clickstream", {})),
