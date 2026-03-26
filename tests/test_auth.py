@@ -9,7 +9,7 @@ def _make_batch() -> dict:
 
 def test_no_auth_header(client: TestClient) -> None:
     resp = client.post("/api/public/ingestion", json=_make_batch())
-    assert resp.status_code == 422
+    assert resp.status_code == 401
 
 
 def test_invalid_auth_scheme(client: TestClient) -> None:
@@ -40,14 +40,25 @@ def test_empty_public_key(client: TestClient) -> None:
     assert resp.status_code == 401
 
 
-def test_empty_secret_key(client: TestClient) -> None:
+def test_empty_secret_key_still_works(client: TestClient) -> None:
+    """Secret key is optional in Basic auth (JWT subject may not be present)."""
     creds = base64.b64encode(b"pk-test:").decode()
     resp = client.post(
         "/api/public/ingestion",
         json=_make_batch(),
         headers={"Authorization": f"Basic {creds}"},
     )
-    assert resp.status_code == 401
+    assert resp.status_code == 207
+
+
+def test_jwt_headers(client: TestClient) -> None:
+    """X-Auth-Tenant/Subject headers take priority over Basic auth."""
+    resp = client.post(
+        "/api/public/ingestion",
+        json=_make_batch(),
+        headers={"X-Auth-Tenant": "tenant-1", "X-Auth-Subject": "user-1"},
+    )
+    assert resp.status_code == 207
 
 
 def test_valid_auth(client: TestClient, auth_headers: dict[str, str]) -> None:

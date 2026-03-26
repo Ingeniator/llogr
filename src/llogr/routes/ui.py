@@ -168,7 +168,12 @@ document.addEventListener('click', e => {
 });
 
 // ── Auth ──
-function authHeader() { return 'Basic ' + btoa(document.getElementById('pk').value + ':' + document.getElementById('sk').value); }
+function authHeader() {
+  const pk = document.getElementById('pk').value;
+  const sk = document.getElementById('sk').value;
+  if (pk) return 'Basic ' + btoa(pk + ':' + sk);
+  return '';  // no Basic auth — rely on JWT headers injected by nginx
+}
 function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
 // ── Init: detect mode ──
