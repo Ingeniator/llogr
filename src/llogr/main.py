@@ -31,6 +31,10 @@ app.add_middleware(RequestIDMiddleware)
 
 @app.on_event("startup")
 async def _startup():
+    if "s3" in settings.features.store_backends:
+        from llogr.s3 import ensure_bucket
+        await ensure_bucket(settings)
+
     needs_ch = (
         "clickhouse" in settings.features.store_backends
         or settings.features.search_backend == "clickhouse"

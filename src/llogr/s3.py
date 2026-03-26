@@ -16,6 +16,25 @@ from llogr.models import IngestionEvent
 
 logger = structlog.get_logger(__name__)
 
+
+async def ensure_bucket(settings: Settings) -> None:
+    """Create the S3 bucket if it doesn't exist."""
+    s3_cfg = settings.s3
+    session = aioboto3.Session(
+        aws_access_key_id=s3_cfg.access_key_id,
+        aws_secret_access_key=s3_cfg.secret_access_key,
+        region_name=s3_cfg.region,
+    )
+    try:
+        async with session.client("s3", endpoint_url=s3_cfg.endpoint) as client:
+            try:
+                await client.head_bucket(Bucket=s3_cfg.bucket)
+            except client.exceptions.ClientError:
+                await client.create_bucket(Bucket=s3_cfg.bucket)
+                logger.info("s3_bucket_created", bucket=s3_cfg.bucket)
+    except Exception as e:
+        logger.error("s3_ensure_bucket_failed", error=str(e))
+
 S3_KEY_TS_FORMAT = "%Y%m%dT%H%M%SZ"
 
 
