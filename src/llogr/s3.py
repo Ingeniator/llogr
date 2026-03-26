@@ -29,11 +29,18 @@ async def ensure_bucket(settings: Settings) -> None:
         async with session.client("s3", endpoint_url=s3_cfg.endpoint) as client:
             try:
                 await client.head_bucket(Bucket=s3_cfg.bucket)
-            except client.exceptions.ClientError:
-                await client.create_bucket(Bucket=s3_cfg.bucket)
-                logger.info("s3_bucket_created", bucket=s3_cfg.bucket)
+            except client.exceptions.ClientError as e:
+                code = int(e.response["Error"].get("Code", 0))
+                if code == 403:
+                    logger.error("s3_bucket_access_denied", bucket=s3_cfg.bucket)
+                    return
+                if code == 404:
+                    await client.create_bucket(Bucket=s3_cfg.bucket)
+                    logger.info("s3_bucket_created", bucket=s3_cfg.bucket)
+                else:
+                    raise
     except Exception as e:
-        logger.error("s3_ensure_bucket_failed", error=str(e))
+        logger.error("s3_ensure_bucket_failed", bucket=s3_cfg.bucket, error=str(e))
 
 S3_KEY_TS_FORMAT = "%Y%m%dT%H%M%SZ"
 
