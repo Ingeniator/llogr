@@ -10,11 +10,12 @@ from llogr.models import IngestionEvent
 logger = structlog.get_logger(__name__)
 
 
-async def ingest(batch: list[IngestionEvent], auth: AuthContext, session_id: str = "none") -> None:
-    """Store events to all configured backends."""
+async def ingest(batch: list[IngestionEvent], auth: AuthContext, session_id: str = "none") -> list[str]:
+    """Store events to all configured backends. Returns list of failed backend names."""
     settings = get_settings()
     backends = settings.features.store_backends
     stored_to = []
+    failed = []
 
     if "s3" in backends:
         try:
@@ -24,6 +25,7 @@ async def ingest(batch: list[IngestionEvent], auth: AuthContext, session_id: str
             logger.info("stored_to_s3", key=key)
         except Exception:
             logger.exception("store_s3_failed")
+            failed.append("s3")
 
     if "clickhouse" in backends and settings.clickhouse.url:
         try:
@@ -32,6 +34,7 @@ async def ingest(batch: list[IngestionEvent], auth: AuthContext, session_id: str
             stored_to.append("clickhouse")
         except Exception:
             logger.exception("store_clickhouse_failed")
+            failed.append("clickhouse")
 
     if "clickstream" in backends and settings.clickstream.api_url:
         try:
@@ -40,6 +43,8 @@ async def ingest(batch: list[IngestionEvent], auth: AuthContext, session_id: str
             stored_to.append("clickstream")
         except Exception:
             logger.exception("store_clickstream_failed")
+            failed.append("clickstream")
 
     EVENTS_INGESTED.labels(project_id=auth.public_key).inc(len(batch))
-    logger.info("ingest_complete", events=len(batch), targets=stored_to)
+    logger.info("ingest_complete", events=len(batch), targets=stored_to, failed=failed)
+    return failed
