@@ -81,20 +81,19 @@ async def ready():
     # --- S3 / MinIO ---
     if "s3" in settings.features.store_backends:
         try:
-            from llogr.s3 import _s3_client_config
             s3_cfg = settings.s3
-            session = aioboto3.Session(
-                aws_access_key_id=s3_cfg.access_key_id,
-                aws_secret_access_key=s3_cfg.secret_access_key,
-                region_name=s3_cfg.region,
-            )
-            async with session.client("s3", endpoint_url=s3_cfg.endpoint, config=_s3_client_config(s3_cfg)) as client:
-                if s3_cfg.addressing_style == "path":
-                    await asyncio.wait_for(
-                        client.list_objects_v2(Bucket=s3_cfg.bucket, MaxKeys=1),
-                        timeout=3,
-                    )
-                else:
+            if s3_cfg.addressing_style == "path":
+                async with _httpx.AsyncClient(timeout=3) as client:
+                    resp = await client.head(s3_cfg.endpoint)
+                    resp.raise_for_status()
+            else:
+                session = aioboto3.Session(
+                    aws_access_key_id=s3_cfg.access_key_id,
+                    aws_secret_access_key=s3_cfg.secret_access_key,
+                    region_name=s3_cfg.region,
+                )
+                from llogr.s3 import _s3_client_config
+                async with session.client("s3", endpoint_url=s3_cfg.endpoint, config=_s3_client_config(s3_cfg)) as client:
                     await asyncio.wait_for(
                         client.head_bucket(Bucket=s3_cfg.bucket),
                         timeout=3,
@@ -128,8 +127,6 @@ async def health() -> dict:
     import aioboto3
     import httpx as _httpx
 
-    from llogr.s3 import _s3_client_config
-
     components: dict[str, str] = {}
     details: dict[str, str] = {}
 
@@ -137,18 +134,18 @@ async def health() -> dict:
     if "s3" in settings.features.store_backends:
         try:
             s3_cfg = settings.s3
-            session = aioboto3.Session(
-                aws_access_key_id=s3_cfg.access_key_id,
-                aws_secret_access_key=s3_cfg.secret_access_key,
-                region_name=s3_cfg.region,
-            )
-            async with session.client("s3", endpoint_url=s3_cfg.endpoint, config=_s3_client_config(s3_cfg)) as client:
-                if s3_cfg.addressing_style == "path":
-                    await asyncio.wait_for(
-                        client.list_objects_v2(Bucket=s3_cfg.bucket, MaxKeys=1),
-                        timeout=3,
-                    )
-                else:
+            if s3_cfg.addressing_style == "path":
+                async with _httpx.AsyncClient(timeout=3) as client:
+                    resp = await client.head(s3_cfg.endpoint)
+                    resp.raise_for_status()
+            else:
+                session = aioboto3.Session(
+                    aws_access_key_id=s3_cfg.access_key_id,
+                    aws_secret_access_key=s3_cfg.secret_access_key,
+                    region_name=s3_cfg.region,
+                )
+                from llogr.s3 import _s3_client_config
+                async with session.client("s3", endpoint_url=s3_cfg.endpoint, config=_s3_client_config(s3_cfg)) as client:
                     await asyncio.wait_for(
                         client.head_bucket(Bucket=s3_cfg.bucket),
                         timeout=3,
