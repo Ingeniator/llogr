@@ -70,6 +70,7 @@ class S3Config:
     access_key_id: str
     secret_access_key: str
     public_endpoint: str | None = None
+    key_prefix: str = ""
 
 
 @dataclass(frozen=True)

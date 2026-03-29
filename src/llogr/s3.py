@@ -134,6 +134,8 @@ async def save_batch_to_s3(
         trace_type = sanitize_trace_type(extract_trace_type(batch))
     ts = datetime.now(timezone.utc).strftime(S3_KEY_TS_FORMAT)
     key = f"{auth.public_key}/{session_id}_{trace_id}_{trace_type}_{input_hash}_{ts}_{uuid.uuid4().hex}.jsonl"
+    if s3_cfg.key_prefix:
+        key = f"{s3_cfg.key_prefix.strip('/')}/{key}"
 
     body = "\n".join(
         json.dumps(event.model_dump(), default=str) for event in batch
@@ -174,6 +176,8 @@ async def list_batch_keys(
     """List batch keys (metadata only, no presigned URLs)."""
     s3_cfg = settings.s3
     prefix = f"{auth.public_key}/"
+    if s3_cfg.key_prefix:
+        prefix = f"{s3_cfg.key_prefix.strip('/')}/{prefix}"
 
     session = aioboto3.Session(
         aws_access_key_id=s3_cfg.access_key_id,
@@ -220,6 +224,8 @@ async def generate_presigned_urls(
     """Generate presigned URLs for given keys, validating ownership."""
     s3_cfg = settings.s3
     prefix = f"{auth.public_key}/"
+    if s3_cfg.key_prefix:
+        prefix = f"{s3_cfg.key_prefix.strip('/')}/{prefix}"
     results: list[dict] = []
 
     session = aioboto3.Session(
@@ -254,6 +260,8 @@ async def list_batch_urls(
 ) -> list[dict]:
     s3_cfg = settings.s3
     prefix = f"{auth.public_key}/"
+    if s3_cfg.key_prefix:
+        prefix = f"{s3_cfg.key_prefix.strip('/')}/{prefix}"
 
     session = aioboto3.Session(
         aws_access_key_id=s3_cfg.access_key_id,
