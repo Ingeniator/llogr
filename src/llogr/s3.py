@@ -22,6 +22,8 @@ def _s3_client_config(s3_cfg: S3Config) -> BotoConfig:
     return BotoConfig(
         s3={"addressing_style": s3_cfg.addressing_style, "payload_signing_enabled": False},
         signature_version="s3v4",
+        request_checksum_calculation="when_required",
+        response_checksum_validation="when_required",
     )
 
 
