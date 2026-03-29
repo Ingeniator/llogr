@@ -71,6 +71,7 @@ class S3Config:
     secret_access_key: str
     public_endpoint: str | None = None
     key_prefix: str = ""
+    addressing_style: str = "virtual"
 
 
 @dataclass(frozen=True)

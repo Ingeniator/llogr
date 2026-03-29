@@ -8,25 +8,37 @@ from datetime import datetime, timezone
 
 import aioboto3
 import structlog
+from botocore.config import Config as BotoConfig
 
 from llogr.auth import AuthContext
-from llogr.config import Settings
+from llogr.config import S3Config, Settings
 from llogr.metrics import S3_SAVE_ERRORS, S3_SAVE_SECONDS
 from llogr.models import IngestionEvent
 
 logger = structlog.get_logger(__name__)
 
 
+def _s3_client_config(s3_cfg: S3Config) -> BotoConfig:
+    return BotoConfig(s3={"addressing_style": s3_cfg.addressing_style})
+
+
 async def ensure_bucket(settings: Settings) -> None:
-    """Create the S3 bucket if it doesn't exist."""
+    """Create the S3 bucket if it doesn't exist.
+
+    Skipped when addressing_style=path with a virtual-hosted endpoint
+    (bucket is typically set to '.' in that case).
+    """
     s3_cfg = settings.s3
+    if s3_cfg.addressing_style == "path":
+        logger.info("s3_ensure_bucket_skipped", reason="path addressing — bucket is managed externally")
+        return
     session = aioboto3.Session(
         aws_access_key_id=s3_cfg.access_key_id,
         aws_secret_access_key=s3_cfg.secret_access_key,
         region_name=s3_cfg.region,
     )
     try:
-        async with session.client("s3", endpoint_url=s3_cfg.endpoint) as client:
+        async with session.client("s3", endpoint_url=s3_cfg.endpoint, config=_s3_client_config(s3_cfg)) as client:
             try:
                 await client.head_bucket(Bucket=s3_cfg.bucket)
             except client.exceptions.ClientError as e:
@@ -148,7 +160,7 @@ async def save_batch_to_s3(
     )
     with S3_SAVE_SECONDS.time():
         try:
-            async with session.client("s3", endpoint_url=s3_cfg.endpoint) as client:
+            async with session.client("s3", endpoint_url=s3_cfg.endpoint, config=_s3_client_config(s3_cfg)) as client:
                 await client.put_object(
                     Bucket=s3_cfg.bucket,
                     Key=key,
@@ -185,7 +197,7 @@ async def list_batch_keys(
         region_name=s3_cfg.region,
     )
     results: list[dict] = []
-    async with session.client("s3", endpoint_url=s3_cfg.endpoint) as client:
+    async with session.client("s3", endpoint_url=s3_cfg.endpoint, config=_s3_client_config(s3_cfg)) as client:
         paginator = client.get_paginator("list_objects_v2")
         async for page in paginator.paginate(Bucket=s3_cfg.bucket, Prefix=prefix):
             for obj in page.get("Contents", []):
@@ -233,7 +245,7 @@ async def generate_presigned_urls(
         aws_secret_access_key=s3_cfg.secret_access_key,
         region_name=s3_cfg.region,
     )
-    async with session.client("s3", endpoint_url=s3_cfg.endpoint) as client:
+    async with session.client("s3", endpoint_url=s3_cfg.endpoint, config=_s3_client_config(s3_cfg)) as client:
         for key in keys:
             if not key.startswith(prefix):
                 continue
@@ -269,7 +281,7 @@ async def list_batch_urls(
         region_name=s3_cfg.region,
     )
     results: list[dict] = []
-    async with session.client("s3", endpoint_url=s3_cfg.endpoint) as client:
+    async with session.client("s3", endpoint_url=s3_cfg.endpoint, config=_s3_client_config(s3_cfg)) as client:
         paginator = client.get_paginator("list_objects_v2")
         async for page in paginator.paginate(Bucket=s3_cfg.bucket, Prefix=prefix):
             for obj in page.get("Contents", []):

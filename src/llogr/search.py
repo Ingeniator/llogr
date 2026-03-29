@@ -31,16 +31,30 @@ def search_logs(
         return []
 
     s3_cfg = settings.s3
-    urls = [f"s3://{s3_cfg.bucket}/{k}" for k in keys]
+
+    # When using path addressing against a virtual-hosted endpoint,
+    # the bucket is a dummy value (e.g. ".") — DuckDB should hit the
+    # endpoint directly with keys as paths.
+    endpoint = s3_cfg.endpoint or ""
+    use_ssl = endpoint.startswith("https://")
+    endpoint_host = endpoint.replace("https://", "").replace("http://", "")
+
+    if s3_cfg.addressing_style == "path":
+        # Virtual-hosted endpoint already points to the bucket;
+        # DuckDB just needs the key as the path.
+        urls = [f"s3://{endpoint_host}/{k}" for k in keys]
+    else:
+        urls = [f"s3://{s3_cfg.bucket}/{k}" for k in keys]
 
     conn = duckdb.connect(":memory:")
     try:
         conn.execute("INSTALL httpfs; LOAD httpfs;")
-        conn.execute(f"SET s3_endpoint = '{s3_cfg.endpoint.replace('http://', '')}';")
+        if s3_cfg.addressing_style != "path":
+            conn.execute(f"SET s3_endpoint = '{endpoint_host}';")
         conn.execute(f"SET s3_access_key_id = '{s3_cfg.access_key_id}';")
         conn.execute(f"SET s3_secret_access_key = '{s3_cfg.secret_access_key}';")
         conn.execute(f"SET s3_region = '{s3_cfg.region}';")
-        conn.execute("SET s3_use_ssl = false;")
+        conn.execute(f"SET s3_use_ssl = {'true' if use_ssl else 'false'};")
         conn.execute("SET s3_url_style = 'path';")
 
         files_list = ", ".join(f"'{u}'" for u in urls)
