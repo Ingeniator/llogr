@@ -19,7 +19,10 @@ logger = structlog.get_logger(__name__)
 
 
 def _s3_client_config(s3_cfg: S3Config) -> BotoConfig:
-    return BotoConfig(s3={"addressing_style": s3_cfg.addressing_style})
+    return BotoConfig(
+        s3={"addressing_style": s3_cfg.addressing_style, "payload_signing_enabled": False},
+        signature_version="s3v4",
+    )
 
 
 async def ensure_bucket(settings: Settings) -> None:
