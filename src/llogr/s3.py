@@ -84,12 +84,18 @@ def extract_input_hash(batch: list[IngestionEvent]) -> str:
 
 
 def extract_trace_type(batch: list[IngestionEvent]) -> str:
-    """Return body.name from the first trace-create event, else 'unknown'."""
+    """Return body.name from the first trace-create event, or any event with a name."""
+    # Prefer trace-create events
     for event in batch:
         if event.type == "trace-create":
             name = event.body.get("name")
             if name:
                 return str(name)
+    # Fallback: first event with a name (covers OTEL span-create/generation-create)
+    for event in batch:
+        name = event.body.get("name")
+        if name:
+            return str(name)
     return "unknown"
 
 
