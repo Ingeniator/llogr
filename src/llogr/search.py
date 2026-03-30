@@ -45,7 +45,7 @@ def search_logs(
 
     conn = duckdb.connect(":memory:", config={"extension_directory": settings.features.duckdb_extension_dir})
     try:
-        conn.execute("INSTALL httpfs; LOAD httpfs;")
+        conn.execute("LOAD httpfs;")
         conn.execute(f"SET s3_endpoint = '{endpoint_host}';")
         conn.execute(f"SET s3_access_key_id = '{s3_cfg.access_key_id}';")
         conn.execute(f"SET s3_secret_access_key = '{s3_cfg.secret_access_key}';")

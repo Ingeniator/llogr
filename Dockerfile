@@ -18,6 +18,9 @@ COPY entrypoint.py .
 
 ENV PATH="/app/.venv/bin:$PATH"
 
+# Pre-install DuckDB extensions into the image
+RUN python -c "import duckdb; c = duckdb.connect(':memory:', config={'extension_directory': '/app/duckdb_extensions'}); c.execute('INSTALL httpfs'); c.close()"
+
 EXPOSE 8000
 
 CMD ["python", "-m", "entrypoint"]

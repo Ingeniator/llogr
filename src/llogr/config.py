@@ -99,7 +99,7 @@ class FeaturesConfig:
     # Search
     search_enabled: bool = False
     search_backend: str = "duckdb"  # "duckdb" or "clickhouse"
-    duckdb_extension_dir: str = "/tmp/duckdb_extensions"
+    duckdb_extension_dir: str = "/app/duckdb_extensions"
 
 
 @dataclass(frozen=True)
