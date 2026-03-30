@@ -73,6 +73,7 @@ class S3Config:
     key_prefix: str = ""
     addressing_style: str = "virtual"
     presign_expiry: int = 3600
+    cors_origins: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -126,7 +127,10 @@ def load_config(path: str | Path) -> Settings:
     text = os.path.expandvars(text)
     raw = yaml.safe_load(text)
     return Settings(
-        s3=S3Config(**raw["s3"]),
+        s3=S3Config(**{
+            **raw["s3"],
+            "cors_origins": tuple(raw["s3"].get("cors_origins", ())),
+        }),
         clickstream=ClickstreamConfig(**raw.get("clickstream", {})),
         server=ServerConfig(**raw.get("server", {})),
         features=FeaturesConfig(**{

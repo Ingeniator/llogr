@@ -28,36 +28,57 @@ def _s3_client_config(s3_cfg: S3Config) -> BotoConfig:
 
 
 async def ensure_bucket(settings: Settings) -> None:
-    """Create the S3 bucket if it doesn't exist.
+    """Create the S3 bucket if it doesn't exist and configure CORS.
 
-    Skipped when addressing_style=path with a virtual-hosted endpoint
-    (bucket is typically set to '.' in that case).
+    Bucket creation is skipped when addressing_style=path (bucket managed externally).
+    CORS is always applied when cors_origins is configured.
     """
     s3_cfg = settings.s3
-    if s3_cfg.addressing_style == "path":
-        logger.info("s3_ensure_bucket_skipped", reason="path addressing — bucket is managed externally")
-        return
     session = aioboto3.Session(
         aws_access_key_id=s3_cfg.access_key_id,
         aws_secret_access_key=s3_cfg.secret_access_key,
         region_name=s3_cfg.region,
     )
-    try:
-        async with session.client("s3", endpoint_url=s3_cfg.endpoint, config=_s3_client_config(s3_cfg)) as client:
-            try:
-                await client.head_bucket(Bucket=s3_cfg.bucket)
-            except client.exceptions.ClientError as e:
-                code = int(e.response["Error"].get("Code", 0))
-                if code == 403:
-                    logger.error("s3_bucket_access_denied", bucket=s3_cfg.bucket)
-                    return
-                if code == 404:
-                    await client.create_bucket(Bucket=s3_cfg.bucket)
-                    logger.info("s3_bucket_created", bucket=s3_cfg.bucket)
-                else:
-                    raise
-    except Exception as e:
-        logger.error("s3_ensure_bucket_failed", bucket=s3_cfg.bucket, error=str(e))
+
+    if s3_cfg.addressing_style != "path":
+        try:
+            async with session.client("s3", endpoint_url=s3_cfg.endpoint, config=_s3_client_config(s3_cfg)) as client:
+                try:
+                    await client.head_bucket(Bucket=s3_cfg.bucket)
+                except client.exceptions.ClientError as e:
+                    code = int(e.response["Error"].get("Code", 0))
+                    if code == 403:
+                        logger.error("s3_bucket_access_denied", bucket=s3_cfg.bucket)
+                        return
+                    if code == 404:
+                        await client.create_bucket(Bucket=s3_cfg.bucket)
+                        logger.info("s3_bucket_created", bucket=s3_cfg.bucket)
+                    else:
+                        raise
+        except Exception as e:
+            logger.error("s3_ensure_bucket_failed", bucket=s3_cfg.bucket, error=str(e))
+    else:
+        logger.info("s3_ensure_bucket_skipped", reason="path addressing — bucket is managed externally")
+
+    if s3_cfg.cors_origins:
+        try:
+            async with session.client("s3", endpoint_url=s3_cfg.endpoint, config=_s3_client_config(s3_cfg)) as client:
+                await client.put_bucket_cors(
+                    Bucket=s3_cfg.bucket,
+                    CORSConfiguration={
+                        "CORSRules": [
+                            {
+                                "AllowedOrigins": list(s3_cfg.cors_origins),
+                                "AllowedMethods": ["GET", "HEAD"],
+                                "AllowedHeaders": ["*"],
+                                "MaxAgeSeconds": 3600,
+                            }
+                        ]
+                    },
+                )
+                logger.info("s3_cors_configured", bucket=s3_cfg.bucket, origins=s3_cfg.cors_origins)
+        except Exception as e:
+            logger.error("s3_cors_failed", bucket=s3_cfg.bucket, error=str(e))
 
 S3_KEY_TS_FORMAT = "%Y%m%dT%H%M%SZ"
 
