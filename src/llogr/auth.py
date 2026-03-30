@@ -32,15 +32,15 @@ class AuthContext(NamedTuple):
 
 def get_auth(
     authorization: Optional[str] = Header(default=None),
-    x_auth_tenant: Optional[str] = Header(default=None),
+    x_group_id: Optional[str] = Header(default=None),
 ) -> AuthContext:
-    """Extract auth from X-Auth-Tenant header (nginx) or Basic auth fallback."""
-    # Prefer tenant header forwarded by nginx (contains group_id: "tenant/user")
-    if x_auth_tenant:
-        public_key = _sanitize_key(x_auth_tenant)
+    """Extract auth from X-Group-ID header (nginx) or Basic auth fallback."""
+    # Prefer group_id header forwarded by nginx (contains "tenant/user")
+    if x_group_id:
+        public_key = _sanitize_key(x_group_id)
         if not public_key:
-            raise HTTPException(status_code=401, detail="Invalid tenant ID")
-        logger.info("authenticated", public_key=public_key, source="jwt")
+            raise HTTPException(status_code=401, detail="Invalid group ID")
+        logger.info("authenticated", public_key=public_key, source="header")
         return AuthContext(public_key=public_key, secret_key="")
 
     # Fallback: Basic auth (e.g. Langfuse SDK calling directly)
