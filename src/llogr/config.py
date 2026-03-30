@@ -99,13 +99,14 @@ class FeaturesConfig:
     # Search
     search_enabled: bool = False
     search_backend: str = "duckdb"  # "duckdb" or "clickhouse"
+    duckdb_extension_dir: str = "/tmp/duckdb_extensions"
 
 
 @dataclass(frozen=True)
 class ServerConfig:
     root_path: str = ""
     host: str = "0.0.0.0"
-    port: int = 8000
+    port: int = 5000
     workers: int = 1
     timeout_keep_alive: int = 65
     debug: bool = False
