@@ -257,7 +257,7 @@ async def generate_presigned_urls(
             url = await client.generate_presigned_url(
                 "get_object",
                 Params={"Bucket": s3_cfg.bucket, "Key": key},
-                ExpiresIn=3600,
+                ExpiresIn=s3_cfg.presign_expiry,
             )
             if s3_cfg.public_endpoint and s3_cfg.endpoint:
                 url = url.replace(s3_cfg.endpoint, s3_cfg.public_endpoint, 1)
@@ -305,7 +305,7 @@ async def list_batch_urls(
                 url = await client.generate_presigned_url(
                     "get_object",
                     Params={"Bucket": s3_cfg.bucket, "Key": key},
-                    ExpiresIn=3600,
+                    ExpiresIn=s3_cfg.presign_expiry,
                 )
                 if s3_cfg.public_endpoint and s3_cfg.endpoint:
                     url = url.replace(s3_cfg.endpoint, s3_cfg.public_endpoint, 1)

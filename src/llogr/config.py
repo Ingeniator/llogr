@@ -72,6 +72,7 @@ class S3Config:
     public_endpoint: str | None = None
     key_prefix: str = ""
     addressing_style: str = "virtual"
+    presign_expiry: int = 3600
 
 
 @dataclass(frozen=True)
