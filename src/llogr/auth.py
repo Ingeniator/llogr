@@ -3,10 +3,26 @@ from __future__ import annotations
 import base64
 from typing import NamedTuple, Optional
 
+import re
+
 import structlog
 from fastapi import Header, HTTPException
 
 logger = structlog.get_logger(__name__)
+
+_UNSAFE_PATH_RE = re.compile(r"[^a-zA-Z0-9_\-./]")
+
+
+def _sanitize_key(raw: str) -> str:
+    """Sanitize key: allow / for nesting, block traversal."""
+    clean = raw.strip()
+    # Block path traversal
+    clean = clean.replace("..", "")
+    # Replace unsafe chars
+    clean = _UNSAFE_PATH_RE.sub("_", clean)
+    # Collapse multiple slashes, strip leading/trailing
+    clean = re.sub(r"/+", "/", clean).strip("/._-")
+    return clean
 
 
 class AuthContext(NamedTuple):
@@ -22,8 +38,11 @@ def get_auth(
     """Extract auth from X-Auth-Tenant/Subject headers (nginx JWT) or Basic auth fallback."""
     # Prefer JWT claims forwarded by nginx
     if x_auth_tenant:
-        logger.info("authenticated", public_key=x_auth_tenant, source="jwt")
-        return AuthContext(public_key=x_auth_tenant, secret_key=x_auth_subject or "")
+        public_key = _sanitize_key(x_auth_tenant)
+        if not public_key:
+            raise HTTPException(status_code=401, detail="Invalid tenant ID")
+        logger.info("authenticated", public_key=public_key, source="jwt")
+        return AuthContext(public_key=public_key, secret_key=x_auth_subject or "")
 
     # Fallback: Basic auth (e.g. Langfuse SDK calling directly)
     if not authorization:
@@ -40,6 +59,7 @@ def get_auth(
         logger.debug("auth_rejected", reason="malformed_credentials", error=str(e))
         raise HTTPException(status_code=401, detail="Malformed credentials")
 
+    public_key = _sanitize_key(public_key)
     if not public_key:
         logger.debug("auth_rejected", reason="empty_public_key")
         raise HTTPException(status_code=401, detail="Empty credentials")
