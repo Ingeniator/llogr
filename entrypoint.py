@@ -7,7 +7,7 @@ from llogr.config import get_settings
 from llogr.logging_config import setup_logging
 
 settings = get_settings()
-logger = setup_logging(debug=settings.server.debug).bind(module=__name__)
+logger = setup_logging(debug=settings.server.debug, silence_probes=settings.server.silence_probes).bind(module=__name__)
 
 from llogr.main import app  # noqa: E402, F401
 

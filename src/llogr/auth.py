@@ -26,16 +26,22 @@ def get_auth(
         return AuthContext(public_key=x_auth_tenant, secret_key=x_auth_subject or "")
 
     # Fallback: Basic auth (e.g. Langfuse SDK calling directly)
-    if not authorization or not authorization.startswith("Basic "):
+    if not authorization:
+        logger.debug("auth_rejected", reason="no_authorization_header")
+        raise HTTPException(status_code=401, detail="Missing authentication")
+    if not authorization.startswith("Basic "):
+        logger.debug("auth_rejected", reason="not_basic_auth", scheme=authorization.split(" ", 1)[0])
         raise HTTPException(status_code=401, detail="Missing authentication")
 
     try:
         decoded = base64.b64decode(authorization.removeprefix("Basic ")).decode()
         public_key, secret_key = decoded.split(":", 1)
-    except Exception:
+    except Exception as e:
+        logger.debug("auth_rejected", reason="malformed_credentials", error=str(e))
         raise HTTPException(status_code=401, detail="Malformed credentials")
 
     if not public_key:
+        logger.debug("auth_rejected", reason="empty_public_key")
         raise HTTPException(status_code=401, detail="Empty credentials")
 
     logger.info("authenticated", public_key=public_key, source="basic")

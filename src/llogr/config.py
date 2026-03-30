@@ -107,6 +107,7 @@ class ServerConfig:
     workers: int = 1
     timeout_keep_alive: int = 65
     debug: bool = False
+    silence_probes: bool = True
 
 
 @dataclass(frozen=True)

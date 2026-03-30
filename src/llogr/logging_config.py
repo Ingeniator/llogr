@@ -5,8 +5,16 @@ import sys
 
 import structlog
 
+SILENCED_PATHS = {"/livez", "/ready", "/health", "/metrics"}
 
-def setup_logging(debug: bool = False) -> structlog.stdlib.BoundLogger:
+
+class SilenceProbesFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        return not any(path in msg for path in SILENCED_PATHS)
+
+
+def setup_logging(debug: bool = False, silence_probes: bool = True) -> structlog.stdlib.BoundLogger:
     structlog.configure(
         processors=[
             structlog.contextvars.merge_contextvars,
@@ -31,5 +39,8 @@ def setup_logging(debug: bool = False) -> structlog.stdlib.BoundLogger:
         stream=sys.stdout,
         level=logging.DEBUG if debug else logging.INFO,
     )
+
+    if silence_probes:
+        logging.getLogger("uvicorn.access").addFilter(SilenceProbesFilter())
 
     return structlog.get_logger()
