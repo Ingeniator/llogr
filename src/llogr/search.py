@@ -50,9 +50,13 @@ def search_logs(
     #   → https://minio:9000/shared-bucket/key ✓
     urls = [f"s3://{s3_cfg.bucket}/{k}" for k in keys]
 
+    import os
     global _httpfs_installed
+    os.makedirs(settings.features.duckdb_temp_dir, exist_ok=True)
+    os.environ.setdefault("HOME", settings.features.duckdb_temp_dir)
     conn = duckdb.connect(":memory:", config={
         "temp_directory": settings.features.duckdb_temp_dir,
+        "home_directory": settings.features.duckdb_temp_dir,
     })
     try:
         if not _httpfs_installed:
