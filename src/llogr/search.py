@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import glob as _glob
+
 import duckdb
+import duckdb_extension_httpfs
 import structlog
 
 from llogr.config import Settings
 
 logger = structlog.get_logger(__name__)
+
+# Pre-locate the httpfs extension binary from the pip package
+_HTTPFS_EXT = _glob.glob(str(duckdb_extension_httpfs.__path__[0]) + "/**/httpfs.duckdb_extension", recursive=True)[0]
+_httpfs_installed = False
 
 
 def search_logs(
@@ -43,8 +50,14 @@ def search_logs(
     #   → https://minio:9000/shared-bucket/key ✓
     urls = [f"s3://{s3_cfg.bucket}/{k}" for k in keys]
 
-    conn = duckdb.connect(":memory:", config={"temp_directory": settings.features.duckdb_temp_dir})
+    global _httpfs_installed
+    conn = duckdb.connect(":memory:", config={
+        "temp_directory": settings.features.duckdb_temp_dir,
+    })
     try:
+        if not _httpfs_installed:
+            conn.install_extension(_HTTPFS_EXT, force_install=True)
+            _httpfs_installed = True
         conn.load_extension("httpfs")
         conn.execute(f"SET s3_endpoint = '{endpoint_host}';")
         conn.execute(f"SET s3_access_key_id = '{s3_cfg.access_key_id}';")
@@ -62,7 +75,9 @@ def search_logs(
                  format='newline_delimited',
                  ignore_errors=true,
                  union_by_name=true)
-            WHERE CAST(body AS VARCHAR) ILIKE $1
+            WHERE to_json(body) ILIKE $1
+               OR CAST(id AS VARCHAR) ILIKE $1
+               OR CAST(type AS VARCHAR) ILIKE $1
             LIMIT {min(limit, 500)}
         """
 
