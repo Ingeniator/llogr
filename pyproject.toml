@@ -16,7 +16,9 @@ dependencies = [
     "structlog>=25.5.0",
     "opentelemetry-proto>=1.40.0",
     "protobuf>=5.0.0",
-    "duckdb>=1.2.0",
+    "duckdb>=1.5.1",
+    "duckdb-extensions",
+    "duckdb-extension-httpfs"
 ]
 
 [build-system]

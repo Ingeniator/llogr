@@ -43,9 +43,9 @@ def search_logs(
     #   → https://minio:9000/shared-bucket/key ✓
     urls = [f"s3://{s3_cfg.bucket}/{k}" for k in keys]
 
-    conn = duckdb.connect(":memory:", config={"extension_directory": settings.features.duckdb_extension_dir})
+    conn = duckdb.connect(":memory:", config={"temp_directory": settings.features.duckdb_temp_dir})
     try:
-        conn.execute("LOAD httpfs;")
+        conn.load_extension("httpfs")
         conn.execute(f"SET s3_endpoint = '{endpoint_host}';")
         conn.execute(f"SET s3_access_key_id = '{s3_cfg.access_key_id}';")
         conn.execute(f"SET s3_secret_access_key = '{s3_cfg.secret_access_key}';")
