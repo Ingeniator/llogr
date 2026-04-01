@@ -10,7 +10,12 @@ from llogr.models import IngestionEvent
 logger = structlog.get_logger(__name__)
 
 
-async def ingest(batch: list[IngestionEvent], auth: AuthContext, session_id: str = "none") -> list[str]:
+async def ingest(
+    batch: list[IngestionEvent],
+    auth: AuthContext,
+    session_id: str = "none",
+    request_id: str = "",
+) -> list[str]:
     """Store events to all configured backends. Returns list of failed backend names."""
     settings = get_settings()
     backends = settings.features.store_backends
@@ -20,7 +25,7 @@ async def ingest(batch: list[IngestionEvent], auth: AuthContext, session_id: str
     if "s3" in backends:
         try:
             from llogr.s3 import save_batch_to_s3
-            key = await save_batch_to_s3(batch, auth, settings, session_id=session_id)
+            key = await save_batch_to_s3(batch, auth, settings, session_id=session_id, request_id=request_id)
             stored_to.append("s3")
             logger.info("stored_to_s3", key=key)
         except Exception:

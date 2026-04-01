@@ -80,6 +80,15 @@ async def ensure_bucket(settings: Settings) -> None:
 S3_KEY_TS_FORMAT = "%Y%m%dT%H%M%SZ"
 
 
+def extract_session_id(batch: list[IngestionEvent]) -> str | None:
+    """Extract sessionId from event body."""
+    for event in batch:
+        sid = event.body.get("sessionId")
+        if sid:
+            return str(sid)
+    return None
+
+
 def extract_trace_id(batch: list[IngestionEvent]) -> str:
     """Extract trace ID from batch. Uses traceId from body, or event id for trace-create."""
     for event in batch:
@@ -165,10 +174,15 @@ async def save_batch_to_s3(
     trace_id: str | None = None,
     input_hash: str | None = None,
     trace_type: str | None = None,
+    request_id: str = "",
 ) -> str:
     s3_cfg = settings.s3
+    if session_id == "none":
+        session_id = extract_session_id(batch) or session_id
     if trace_id is None:
         trace_id = extract_trace_id(batch)
+        if trace_id == "unknown" and request_id:
+            trace_id = request_id
     if input_hash is None:
         input_hash = extract_input_hash(batch)
     if trace_type is None:

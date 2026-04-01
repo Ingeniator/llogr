@@ -15,8 +15,9 @@ async def ingest_endpoint(
     batch: IngestionBatch,
     auth: AuthContext = Depends(get_auth),
     x_session_id: str = Header(default="none"),
+    x_request_id: str = Header(default=""),
 ) -> JSONResponse:
-    failed = await ingest(batch.batch, auth, session_id=x_session_id)
+    failed = await ingest(batch.batch, auth, session_id=x_session_id, request_id=x_request_id)
     if failed:
         errors = [{"message": f"storage failed: {', '.join(failed)}"}]
         return JSONResponse(
