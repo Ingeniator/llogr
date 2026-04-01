@@ -51,12 +51,12 @@ def test_empty_secret_key_still_works(client: TestClient) -> None:
     assert resp.status_code == 207
 
 
-def test_jwt_headers(client: TestClient) -> None:
-    """X-Auth-Tenant/Subject headers take priority over Basic auth."""
+def test_group_id_header(client: TestClient) -> None:
+    """X-Group-ID header takes priority over Basic auth."""
     resp = client.post(
         "/api/public/ingestion",
         json=_make_batch(),
-        headers={"X-Auth-Tenant": "tenant-1", "X-Auth-Subject": "user-1"},
+        headers={"X-Group-ID": "tenant-1/user-1"},
     )
     assert resp.status_code == 207
 

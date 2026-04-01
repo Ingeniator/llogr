@@ -9,7 +9,7 @@ from llogr.main import app
 
 @pytest.fixture
 def client() -> TestClient:
-    with patch("llogr.routes.ingestion.ingest", new_callable=AsyncMock):
+    with patch("llogr.routes.ingestion.ingest", new_callable=AsyncMock, return_value=[]):
         yield TestClient(app)
 
 
