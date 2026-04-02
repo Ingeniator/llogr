@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import os
+
 import structlog
 from fastapi import FastAPI, Request
+from prometheus_client import CollectorRegistry, generate_latest, multiprocess, CONTENT_TYPE_LATEST
 from prometheus_fastapi_instrumentator import Instrumentator
 from prometheus_fastapi_instrumentator.metrics import latency, request_size, requests, response_size
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response as StarletteResponse
 
 from llogr.config import get_settings
 from llogr.routes.ingestion import router as ingestion_router
@@ -14,6 +18,12 @@ from llogr.routes.search import router as search_router
 from llogr.routes.ui import router as ui_router
 
 settings = get_settings()
+
+# Prometheus multiprocess setup — must happen before any metrics are created
+_METRICS_DIR = os.environ.get("PROMETHEUS_MULTIPROC_DIR", "/tmp/prometheus_multiproc")
+os.environ["PROMETHEUS_MULTIPROC_DIR"] = _METRICS_DIR
+os.makedirs(_METRICS_DIR, exist_ok=True)
+
 app = FastAPI(title="llogr", version="0.1.0", root_path=settings.server.root_path)
 
 
@@ -60,7 +70,19 @@ Instrumentator(
     response_size(),
 ).add(
     requests(),
-).instrument(app).expose(app)
+).instrument(app)
+
+
+@app.get("/metrics")
+async def metrics():
+    """Multiprocess-safe metrics endpoint."""
+    if os.path.isdir(_METRICS_DIR):
+        registry = CollectorRegistry()
+        multiprocess.MultiProcessCollector(registry)
+    else:
+        from prometheus_client import REGISTRY
+        registry = REGISTRY
+    return StarletteResponse(content=generate_latest(registry), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.get("/livez")
