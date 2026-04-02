@@ -67,6 +67,7 @@ async def search(
     if not keys:
         return {"results": [], "files_scanned": 0, "backend": "duckdb"}
 
-    results = search_logs(keys, q, settings, limit=limit)
+    import asyncio
+    results = await asyncio.to_thread(search_logs, keys, q, settings, limit)
 
     return {"results": results, "files_scanned": len(keys), "keys": keys, "backend": "duckdb"}
