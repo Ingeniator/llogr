@@ -28,20 +28,24 @@ def _sanitize_key(raw: str) -> str:
 class AuthContext(NamedTuple):
     public_key: str
     secret_key: str
+    is_org_admin: bool = False
 
 
 def get_auth(
     authorization: Optional[str] = Header(default=None),
     x_group_id: Optional[str] = Header(default=None),
+    x_role: Optional[str] = Header(default=None),
 ) -> AuthContext:
     """Extract auth from X-Group-ID header (nginx) or Basic auth fallback."""
+    is_org_admin = (x_role or "").upper() == "ORG_ADMIN"
+
     # Prefer group_id header forwarded by nginx (contains "tenant/user")
     if x_group_id:
         public_key = _sanitize_key(x_group_id)
         if not public_key:
             raise HTTPException(status_code=401, detail="Invalid group ID")
-        logger.info("authenticated", public_key=public_key, source="header")
-        return AuthContext(public_key=public_key, secret_key="")
+        logger.info("authenticated", public_key=public_key, is_org_admin=is_org_admin, source="header")
+        return AuthContext(public_key=public_key, secret_key="", is_org_admin=is_org_admin)
 
     # Fallback: Basic auth (e.g. Langfuse SDK calling directly)
     if not authorization:

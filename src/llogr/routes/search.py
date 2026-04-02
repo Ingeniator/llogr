@@ -46,6 +46,7 @@ async def search(
         results = await search_logs_ch(
             query=q,
             project_id=auth.public_key,
+            is_org_admin=auth.is_org_admin,
             settings=settings,
             start=start, end=end,
             session_id=session_id, trace_id=trace_id,

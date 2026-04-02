@@ -118,6 +118,7 @@ async def search_logs_ch(
     query: str,
     project_id: str,
     settings: Settings,
+    is_org_admin: bool = False,
     start: datetime | None = None,
     end: datetime | None = None,
     session_id: str | None = None,
@@ -131,8 +132,13 @@ async def search_logs_ch(
     if not cfg.url:
         return []
 
-    conditions = ["project_id = {project_id:String}"]
-    params = {"project_id": project_id}
+    if is_org_admin and "/" in project_id:
+        org = project_id.split("/", 1)[0]
+        conditions = ["project_id LIKE {project_id:String}"]
+        params = {"project_id": f"{org}/%"}
+    else:
+        conditions = ["project_id = {project_id:String}"]
+        params = {"project_id": project_id}
 
     if start:
         conditions.append("timestamp >= {start:String}")

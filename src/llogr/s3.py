@@ -166,6 +166,18 @@ def parse_key_meta(key: str) -> KeyMeta | None:
         return None
 
 
+def _list_prefix(auth: AuthContext, s3_cfg) -> str:
+    """Build S3 prefix for listing. Org admins see the whole org."""
+    if auth.is_org_admin and "/" in auth.public_key:
+        org = auth.public_key.split("/", 1)[0]
+        prefix = f"{org}/"
+    else:
+        prefix = f"{auth.public_key}/"
+    if s3_cfg.key_prefix:
+        prefix = f"{s3_cfg.key_prefix.strip('/')}/{prefix}"
+    return prefix
+
+
 async def save_batch_to_s3(
     batch: list[IngestionEvent],
     auth: AuthContext,
@@ -230,9 +242,7 @@ async def list_batch_keys(
 ) -> list[dict]:
     """List batch keys (metadata only, no presigned URLs)."""
     s3_cfg = settings.s3
-    prefix = f"{auth.public_key}/"
-    if s3_cfg.key_prefix:
-        prefix = f"{s3_cfg.key_prefix.strip('/')}/{prefix}"
+    prefix = _list_prefix(auth, s3_cfg)
 
     session = aioboto3.Session(
         aws_access_key_id=s3_cfg.access_key_id,
@@ -278,9 +288,7 @@ async def generate_presigned_urls(
 ) -> list[dict]:
     """Generate presigned URLs for given keys, validating ownership."""
     s3_cfg = settings.s3
-    prefix = f"{auth.public_key}/"
-    if s3_cfg.key_prefix:
-        prefix = f"{s3_cfg.key_prefix.strip('/')}/{prefix}"
+    prefix = _list_prefix(auth, s3_cfg)
     results: list[dict] = []
 
     session = aioboto3.Session(
@@ -314,9 +322,7 @@ async def list_batch_urls(
     trace_type: str | None = None,
 ) -> list[dict]:
     s3_cfg = settings.s3
-    prefix = f"{auth.public_key}/"
-    if s3_cfg.key_prefix:
-        prefix = f"{s3_cfg.key_prefix.strip('/')}/{prefix}"
+    prefix = _list_prefix(auth, s3_cfg)
 
     session = aioboto3.Session(
         aws_access_key_id=s3_cfg.access_key_id,
