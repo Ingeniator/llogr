@@ -71,7 +71,7 @@ async def send_to_clickstream(
                 )
                 resp.raise_for_status()
         except Exception:
-            CLICKBEAT_FORWARD_ERRORS.inc()
+            CLICKSTREAM_FORWARD_ERRORS.inc()
             raise
 
     logger.info("forwarded_to_clickstream", events=len(amplitude_events))
