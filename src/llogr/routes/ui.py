@@ -277,7 +277,11 @@ async function listEvents() {
   } catch (e) { status.textContent = 'Error: ' + e.message; }
 }
 
-function toStr(v) { return typeof v === 'string' ? v : (v != null ? JSON.stringify(v) : ''); }
+function toStr(v) {
+  if (typeof v === 'string') return v;
+  if (Array.isArray(v)) return v.map(p => p.text || p.content || JSON.stringify(p)).join(' ');
+  return v != null ? JSON.stringify(v) : '';
+}
 
 function parseBody(body) {
   if (!body) return {};
