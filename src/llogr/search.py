@@ -73,19 +73,29 @@ def search_logs(
 
         files_list = ", ".join(f"'{u}'" for u in urls)
 
-        sql = f"""
-            SELECT *
-            FROM read_json_auto([{files_list}],
-                 format='newline_delimited',
-                 ignore_errors=true,
-                 union_by_name=true)
-            WHERE to_json(body) ILIKE $1
-               OR CAST(id AS VARCHAR) ILIKE $1
-               OR CAST(type AS VARCHAR) ILIKE $1
-            LIMIT {min(limit, 500)}
-        """
-
-        result = conn.execute(sql, [f"%{query}%"])
+        if query and query != "*":
+            sql = f"""
+                SELECT *
+                FROM read_json_auto([{files_list}],
+                     format='newline_delimited',
+                     ignore_errors=true,
+                     union_by_name=true)
+                WHERE to_json(body) ILIKE $1
+                   OR CAST(id AS VARCHAR) ILIKE $1
+                   OR CAST(type AS VARCHAR) ILIKE $1
+                LIMIT {min(limit, 500)}
+            """
+            result = conn.execute(sql, [f"%{query}%"])
+        else:
+            sql = f"""
+                SELECT *
+                FROM read_json_auto([{files_list}],
+                     format='newline_delimited',
+                     ignore_errors=true,
+                     union_by_name=true)
+                LIMIT {min(limit, 500)}
+            """
+            result = conn.execute(sql)
         columns = [desc[0] for desc in result.description]
         rows = result.fetchall()
 

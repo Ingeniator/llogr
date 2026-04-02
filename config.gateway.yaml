@@ -7,17 +7,18 @@ s3:
   secret_access_key: "minioadmin"
   addressing_style: "path"
   cors_origins:
-    - "*"
+  - "*"
 clickstream:
   api_url: "http://clickstream:9999/2/httpapi"
   api_key: "clickstream-key"
 server:
   root_path: "/llogr"
+  hide_auth_inputs: true
 features:
   store_backends:
-    - s3
-    - clickhouse
-    - clickstream
+  - s3
+  - clickhouse
+  - clickstream
   search_enabled: true
   search_backend: "clickhouse"
 clickhouse:

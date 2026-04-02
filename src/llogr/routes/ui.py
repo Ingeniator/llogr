@@ -289,13 +289,20 @@ function parseBody(body) {
   return body;
 }
 
+function _extractMessages(inp) {
+  if (Array.isArray(inp)) return inp;
+  if (inp.messages && Array.isArray(inp.messages)) return inp.messages;
+  return null;
+}
+
 function inputPreview(body) {
   const b = parseBody(body);
   if (!b.input) return '-';
   const inp = typeof b.input === 'string' ? (() => { try { return JSON.parse(b.input); } catch(e) { return b.input; } })() : b.input;
   if (typeof inp === 'string') return inp.substring(0, 80);
-  if (inp.messages && inp.messages.length) {
-    const last = inp.messages[inp.messages.length - 1];
+  const msgs = _extractMessages(inp);
+  if (msgs && msgs.length) {
+    const last = msgs[msgs.length - 1];
     return toStr(last.content).substring(0, 80);
   }
   return JSON.stringify(inp).substring(0, 80);
