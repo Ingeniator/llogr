@@ -61,7 +61,8 @@ async def send_to_clickstream(
 
     with CLICKSTREAM_FORWARD_SECONDS.time():
         try:
-            async with httpx.AsyncClient() as client:
+            verify = cfg.ca_bundle if cfg.ca_bundle else cfg.verify_ssl
+            async with httpx.AsyncClient(verify=verify) as client:
                 resp = await client.post(
                     cfg.api_url,
                     json=payload,

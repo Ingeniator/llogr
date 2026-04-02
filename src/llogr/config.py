@@ -80,6 +80,8 @@ class S3Config:
 class ClickstreamConfig:
     api_url: str = ""       # POST /2/httpapi (Amplitude format)
     api_key: str = ""
+    verify_ssl: bool = True
+    ca_bundle: str = ""     # path to CA bundle file
 
 
 @dataclass(frozen=True)
