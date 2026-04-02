@@ -24,7 +24,7 @@ def _iso_to_epoch_ms(ts: str) -> int:
         return int(datetime.now().timestamp() * 1000)
 
 
-def transform_to_amplitude(events: list[IngestionEvent], auth: AuthContext) -> list[dict]:
+def transform_to_amplitude(events: list[IngestionEvent], auth: AuthContext, input_hash: str = "") -> list[dict]:
     """Transform llogr events into Amplitude event format."""
     amplitude_events = []
     for event in events:
@@ -34,7 +34,7 @@ def transform_to_amplitude(events: list[IngestionEvent], auth: AuthContext) -> l
             "event_type": event.type,
             "time": _iso_to_epoch_ms(event.timestamp),
             "insert_id": event.id or str(uuid.uuid4()),
-            "event_properties": event.body,
+            "event_properties": {**event.body, "input_hash": input_hash},
             "user_properties": {
                 "project_id": auth.public_key,
             },
@@ -48,10 +48,11 @@ async def send_to_clickstream(
     events: list[IngestionEvent],
     auth: AuthContext,
     settings: Settings,
+    input_hash: str = "",
 ) -> None:
     """Send events to a Clickstream/Amplitude-compatible endpoint using POST /2/httpapi."""
     cfg = settings.clickstream
-    amplitude_events = transform_to_amplitude(events, auth)
+    amplitude_events = transform_to_amplitude(events, auth, input_hash=input_hash)
 
     payload = {
         "api_key": cfg.api_key,

@@ -49,6 +49,7 @@ async def search(
             settings=settings,
             start=start, end=end,
             session_id=session_id, trace_id=trace_id,
+            trace_type=trace_type, input_hash=input_hash,
             limit=limit,
         )
         return {"results": results, "backend": "clickhouse"}

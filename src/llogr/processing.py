@@ -22,10 +22,14 @@ async def ingest(
     stored_to = []
     failed = []
 
+    # Pre-compute shared metadata once
+    from llogr.s3 import extract_input_hash
+    input_hash = extract_input_hash(batch)
+
     if "s3" in backends:
         try:
             from llogr.s3 import save_batch_to_s3
-            key = await save_batch_to_s3(batch, auth, settings, session_id=session_id, request_id=request_id)
+            key = await save_batch_to_s3(batch, auth, settings, session_id=session_id, request_id=request_id, input_hash=input_hash)
             stored_to.append("s3")
             logger.info("stored_to_s3", key=key)
         except Exception:
@@ -35,7 +39,7 @@ async def ingest(
     if "clickhouse" in backends and settings.clickhouse.url:
         try:
             from llogr.clickhouse import insert_events
-            await insert_events(batch, auth, settings)
+            await insert_events(batch, auth, settings, input_hash=input_hash)
             stored_to.append("clickhouse")
         except Exception:
             logger.exception("store_clickhouse_failed")
@@ -44,7 +48,7 @@ async def ingest(
     if "clickstream" in backends and settings.clickstream.api_url:
         try:
             from llogr.clickstream import send_to_clickstream
-            await send_to_clickstream(batch, auth, settings)
+            await send_to_clickstream(batch, auth, settings, input_hash=input_hash)
             stored_to.append("clickstream")
         except Exception:
             logger.exception("store_clickstream_failed")

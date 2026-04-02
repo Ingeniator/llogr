@@ -244,6 +244,8 @@ async function searchEvents() {
   const params = searchParams();
   params.set('q', q);
   params.set('limit', '100');
+  const tt = document.getElementById('f_tracetype')?.value.trim();
+  if (tt) params.set('trace_type', tt);
   try {
     const resp = await fetch(BASE + '/api/public/logs/search?' + params, {
       headers: { 'Authorization': authHeader() }

@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS {database}.{table} (
     name         String DEFAULT '',
     trace_id     String DEFAULT '',
     session_id   String DEFAULT '',
+    input_hash   String DEFAULT '',
     body         String,
     INDEX idx_body body TYPE tokenbf_v1(10240, 3, 0) GRANULARITY 4
 ) ENGINE = MergeTree()
@@ -72,6 +73,7 @@ async def insert_events(
     events: list[IngestionEvent],
     auth: AuthContext,
     settings: Settings,
+    input_hash: str = "",
 ) -> None:
     """Insert events into ClickHouse."""
     cfg = settings.clickhouse
@@ -92,6 +94,7 @@ async def insert_events(
             "name": body.get("name", "") or "",
             "trace_id": body.get("traceId", "") or "",
             "session_id": body.get("sessionId", "") or "",
+            "input_hash": input_hash,
             "body": json.dumps(body, default=str),
         }))
 
@@ -119,6 +122,8 @@ async def search_logs_ch(
     end: datetime | None = None,
     session_id: str | None = None,
     trace_id: str | None = None,
+    trace_type: str | None = None,
+    input_hash: str | None = None,
     limit: int = 50,
 ) -> list[dict]:
     """Full-text search in ClickHouse."""
@@ -141,6 +146,12 @@ async def search_logs_ch(
     if trace_id:
         conditions.append("trace_id = {trace_id:String}")
         params["trace_id"] = trace_id
+    if trace_type:
+        conditions.append("name = {trace_type:String}")
+        params["trace_type"] = trace_type
+    if input_hash:
+        conditions.append("input_hash = {input_hash:String}")
+        params["input_hash"] = input_hash
 
     if query and query != "*":
         conditions.append("body ILIKE {query:String}")
