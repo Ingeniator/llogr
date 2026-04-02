@@ -277,26 +277,36 @@ async function listEvents() {
   } catch (e) { status.textContent = 'Error: ' + e.message; }
 }
 
+function toStr(v) { return typeof v === 'string' ? v : (v != null ? JSON.stringify(v) : ''); }
+
+function parseBody(body) {
+  if (!body) return {};
+  if (typeof body === 'string') { try { return JSON.parse(body); } catch(e) { return {}; } }
+  return body;
+}
+
 function inputPreview(body) {
-  if (!body || !body.input) return '-';
-  const inp = body.input;
+  const b = parseBody(body);
+  if (!b.input) return '-';
+  const inp = typeof b.input === 'string' ? (() => { try { return JSON.parse(b.input); } catch(e) { return b.input; } })() : b.input;
+  if (typeof inp === 'string') return inp.substring(0, 80);
   if (inp.messages && inp.messages.length) {
     const last = inp.messages[inp.messages.length - 1];
-    return (last.content || '').substring(0, 80);
+    return toStr(last.content).substring(0, 80);
   }
-  if (typeof inp === 'string') return inp.substring(0, 80);
   return JSON.stringify(inp).substring(0, 80);
 }
 
 function outputPreview(body) {
-  if (!body || !body.output) return '-';
-  const out = body.output;
+  const b = parseBody(body);
+  if (!b.output) return '-';
+  const out = typeof b.output === 'string' ? (() => { try { return JSON.parse(b.output); } catch(e) { return b.output; } })() : b.output;
+  if (typeof out === 'string') return out.substring(0, 80);
   if (out.choices && out.choices.length) {
     const msg = out.choices[0].message;
-    return msg ? (msg.content || '').substring(0, 80) : '-';
+    return msg ? toStr(msg.content).substring(0, 80) : '-';
   }
-  if (out.content) return out.content.substring(0, 80);
-  if (typeof out === 'string') return out.substring(0, 80);
+  if (out.content) return toStr(out.content).substring(0, 80);
   return '-';
 }
 
@@ -316,7 +326,7 @@ function renderEventsTable(events) {
     '<button class="btn-secondary" onclick="exportEventsDataset()">Export as dataset</button>';
 
   events.forEach((ev, i) => {
-    const b = ev.body || {};
+    const b = parseBody(ev.body);
     const tr = document.createElement('tr');
     tr.innerHTML =
       '<td><input type="checkbox" class="sel" data-idx="' + i + '"></td>' +
