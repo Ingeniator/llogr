@@ -180,4 +180,5 @@ def ui_config() -> dict:
     return {
         "search_enabled": settings.features.search_enabled,
         "search_backend": settings.features.search_backend if settings.features.search_enabled else None,
+        "hide_auth_inputs": settings.server.hide_auth_inputs,
     }

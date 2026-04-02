@@ -113,6 +113,7 @@ class ServerConfig:
     timeout_keep_alive: int = 65
     debug: bool = False
     silence_probes: bool = True
+    hide_auth_inputs: bool = False
 
 
 @dataclass(frozen=True)

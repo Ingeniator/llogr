@@ -62,7 +62,7 @@ HTML = """\
 <body>
 <h1>llogr — log browser <span class="badge" id="modeBadge"></span></h1>
 
-<div class="card">
+<div class="card" id="authCard">
   <div class="row">
     <div><label>Public Key</label><input type="text" id="pk" placeholder="pk-..."></div>
     <div><label>Secret Key</label><input type="text" id="sk" placeholder="sk-..."></div>
@@ -182,6 +182,9 @@ async function init() {
     const resp = await fetch(BASE + '/api/public/ui-config');
     if (resp.ok) {
       const cfg = await resp.json();
+      if (cfg.hide_auth_inputs) {
+        document.getElementById('authCard').style.display = 'none';
+      }
       if (cfg.search_enabled && (cfg.search_backend === 'clickhouse' || cfg.search_backend === 'clickbeat')) {
         uiMode = 'events';
         searchBackend = cfg.search_backend;
