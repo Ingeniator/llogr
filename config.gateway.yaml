@@ -5,6 +5,9 @@ s3:
   public_endpoint: "http://localhost:8888/s3"
   access_key_id: "minioadmin"
   secret_access_key: "minioadmin"
+  addressing_style: "path"
+  cors_origins:
+    - "*"
 clickstream:
   api_url: "http://clickstream:9999/2/httpapi"
   api_key: "clickstream-key"
