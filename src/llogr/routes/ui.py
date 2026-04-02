@@ -449,6 +449,10 @@ async function fullTextSearch() {
   status.textContent = 'Searching...';
   const params = searchParams();
   params.set('q', q);
+  const tt = document.getElementById('f_tracetype').value.trim();
+  const h = document.getElementById('f_hash').value.trim();
+  if (tt) params.set('trace_type', tt);
+  if (h) params.set('input_hash', h);
   try {
     const resp = await fetch(BASE + '/api/public/logs/search?' + params, {
       headers: { 'Authorization': authHeader() }

@@ -24,6 +24,8 @@ async def search(
     end: datetime | None = Query(default=None),
     session_id: str | None = Query(default=None),
     trace_id: str | None = Query(default=None),
+    trace_type: str | None = Query(default=None),
+    input_hash: str | None = Query(default=None),
     limit: int = Query(default=50, le=500),
     auth: AuthContext = Depends(get_auth),
     settings: Settings = Depends(get_settings),
@@ -55,6 +57,7 @@ async def search(
     keys_meta = await list_batch_keys(
         auth, settings, start=start, end=end,
         session_id=session_id, trace_id=trace_id,
+        trace_type=trace_type, input_hash=input_hash,
     )
     keys = [f["key"] for f in keys_meta]
 
