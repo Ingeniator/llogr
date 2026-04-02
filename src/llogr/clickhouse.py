@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 
 import httpx
@@ -13,6 +14,10 @@ from llogr.config import ClickHouseConfig, Settings
 from llogr.models import IngestionEvent
 
 logger = structlog.get_logger(__name__)
+
+# Suppress httpx request logging — it leaks ClickHouse password in query params
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS {database}.{table} (
