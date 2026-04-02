@@ -307,8 +307,9 @@ function renderEventsTable(events) {
 
   const resultActions = document.getElementById('resultActions');
   resultActions.innerHTML =
-    '<button class="btn-secondary" onclick="exportEventsDataset()">Export as dataset</button>' +
-    '<button class="btn-secondary" onclick="downloadEventsJson()">Download JSON</button>';
+    '<button class="btn-primary" onclick="downloadEventsJson()">Download catalog</button>' +
+    '<button class="btn-secondary" onclick="downloadEventsJsonl()">Download JSONL</button>' +
+    '<button class="btn-secondary" onclick="exportEventsDataset()">Export as dataset</button>';
 
   events.forEach((ev, i) => {
     const b = ev.body || {};
@@ -344,8 +345,16 @@ function getSelectedEvents() {
 function downloadEventsJson() {
   const events = getSelectedEvents();
   if (!events.length) return;
-  downloadFile(JSON.stringify(events, null, 2), 'events.json', 'application/json');
+  downloadFile(JSON.stringify(events, null, 2), 'catalog.json', 'application/json');
   document.getElementById('urls').textContent = 'Downloaded ' + events.length + ' event(s).';
+}
+
+function downloadEventsJsonl() {
+  const events = getSelectedEvents();
+  if (!events.length) return;
+  const lines = events.map(e => JSON.stringify(e));
+  downloadFile(lines.join('\\n') + '\\n', 'index.jsonl', 'application/x-ndjson');
+  document.getElementById('urls').textContent = 'Downloaded index with ' + events.length + ' event(s).';
 }
 
 function exportEventsDataset() {
@@ -395,7 +404,7 @@ function renderFilesTable(files) {
   const resultActions = document.getElementById('resultActions');
   resultActions.innerHTML =
     '<button class="btn-primary" onclick="getUrls()">Download catalog</button>' +
-    '<button class="btn-secondary" onclick="getIndex()">Download index</button>' +
+    '<button class="btn-secondary" onclick="getIndex()">Download JSONL</button>' +
     '<button class="btn-secondary" onclick="getDataset()">Export as dataset</button>';
 
   files.forEach(f => {
