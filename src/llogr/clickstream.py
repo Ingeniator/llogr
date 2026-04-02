@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import datetime
 
@@ -60,19 +61,27 @@ async def send_to_clickstream(
         "options": {"min_id_length": 1},
     }
 
+    max_retries = 3
     with CLICKSTREAM_FORWARD_SECONDS.time():
-        try:
-            verify = cfg.ca_bundle if cfg.ca_bundle else cfg.verify_ssl
-            async with httpx.AsyncClient(verify=verify) as client:
-                resp = await client.post(
-                    cfg.api_url,
-                    json=payload,
-                    headers={"Content-Type": "application/json"},
-                    timeout=10,
-                )
-                resp.raise_for_status()
-        except Exception:
-            CLICKSTREAM_FORWARD_ERRORS.inc()
-            raise
+        for attempt in range(max_retries):
+            try:
+                verify = cfg.ca_bundle if cfg.ca_bundle else cfg.verify_ssl
+                async with httpx.AsyncClient(verify=verify) as client:
+                    resp = await client.post(
+                        cfg.api_url,
+                        json=payload,
+                        headers={"Content-Type": "application/json"},
+                        timeout=10,
+                    )
+                    resp.raise_for_status()
+                break
+            except Exception:
+                if attempt < max_retries - 1:
+                    delay = 0.5 * (2 ** attempt)
+                    logger.warning("clickstream_forward_retry", attempt=attempt + 1, delay=delay)
+                    await asyncio.sleep(delay)
+                else:
+                    CLICKSTREAM_FORWARD_ERRORS.inc()
+                    raise
 
     logger.info("forwarded_to_clickstream", events=len(amplitude_events))

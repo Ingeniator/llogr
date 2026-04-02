@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import datetime, timezone
@@ -101,17 +102,25 @@ async def insert_events(
     data = "\n".join(rows)
     sql = f"INSERT INTO {cfg.database}.{cfg.table} FORMAT JSONEachRow"
 
-    try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                _ch_url(cfg),
-                params={**_ch_params(cfg), "query": sql},
-                content=data,
-                headers={"Content-Type": "application/json"},
-            )
-            resp.raise_for_status()
-    except Exception as e:
-        logger.error("clickhouse_insert_failed", error=str(e))
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    _ch_url(cfg),
+                    params={**_ch_params(cfg), "query": sql},
+                    content=data,
+                    headers={"Content-Type": "application/json"},
+                )
+                resp.raise_for_status()
+            return
+        except Exception as e:
+            if attempt < max_retries - 1:
+                delay = 0.5 * (2 ** attempt)
+                logger.warning("clickhouse_insert_retry", attempt=attempt + 1, delay=delay, error=str(e))
+                await asyncio.sleep(delay)
+            else:
+                logger.error("clickhouse_insert_failed", error=str(e))
 
 
 async def search_logs_ch(
