@@ -65,4 +65,4 @@ async def search(
 
     results = search_logs(keys, q, settings, limit=limit)
 
-    return {"results": results, "files_scanned": len(keys), "backend": "duckdb"}
+    return {"results": results, "files_scanned": len(keys), "keys": keys, "backend": "duckdb"}

@@ -128,6 +128,7 @@ const BASE = '{{BASE_PATH}}';
 let uiMode = 's3'; // 's3' or 'events'
 let searchBackend = null;
 let currentEvents = []; // for events mode — holds loaded data
+let currentSearchKeys = []; // S3 keys from the last fulltext search scope
 let timePreset = '24h';
 let customFrom = null, customTo = null;
 
@@ -250,6 +251,7 @@ async function searchEvents() {
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const data = await resp.json();
     currentEvents = data.results;
+    currentSearchKeys = [];
     renderEventsTable(currentEvents);
     status.textContent = currentEvents.length + ' event(s) found [' + (data.backend || searchBackend) + ']';
   } catch (e) { status.textContent = 'Error: ' + e.message; }
@@ -349,12 +351,31 @@ function downloadEventsJson() {
   document.getElementById('urls').textContent = 'Downloaded ' + events.length + ' event(s).';
 }
 
-function downloadEventsJsonl() {
+async function downloadEventsJsonl() {
+  const urlsDiv = document.getElementById('urls');
+  // If we have S3 keys (from DuckDB search), generate presigned URLs
+  if (currentSearchKeys.length) {
+    urlsDiv.textContent = 'Fetching URLs...';
+    try {
+      const resp = await fetch(BASE + '/api/public/logs/urls', {
+        method: 'POST',
+        headers: { 'Authorization': authHeader(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keys: currentSearchKeys })
+      });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const data = await resp.json();
+      const lines = data.files.map(f => JSON.stringify({ key: f.key, url: f.url }));
+      downloadFile(lines.join('\\n') + '\\n', 'index.jsonl', 'application/x-ndjson');
+      urlsDiv.textContent = 'Downloaded JSONL with ' + data.files.length + ' presigned URL(s).';
+    } catch (e) { urlsDiv.textContent = 'Error: ' + e.message; }
+    return;
+  }
+  // Fallback: plain events as JSONL
   const events = getSelectedEvents();
   if (!events.length) return;
   const lines = events.map(e => JSON.stringify(e));
-  downloadFile(lines.join('\\n') + '\\n', 'index.jsonl', 'application/x-ndjson');
-  document.getElementById('urls').textContent = 'Downloaded index with ' + events.length + ' event(s).';
+  downloadFile(lines.join('\\n') + '\\n', 'events.jsonl', 'application/x-ndjson');
+  urlsDiv.textContent = 'Downloaded ' + events.length + ' event(s) as JSONL.';
 }
 
 function exportEventsDataset() {
@@ -436,6 +457,7 @@ async function fullTextSearch() {
     const data = await resp.json();
     // Render as events table since DuckDB returns events
     currentEvents = data.results;
+    currentSearchKeys = data.keys || [];
     renderEventsTable(currentEvents);
     status.textContent = data.results.length + ' result(s) across ' + (data.files_scanned || '?') + ' file(s) [duckdb]';
   } catch (e) { status.textContent = 'Error: ' + e.message; }
