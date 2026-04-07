@@ -167,10 +167,15 @@ def parse_key_meta(key: str) -> KeyMeta | None:
 
 
 def _list_prefix(auth: AuthContext, s3_cfg) -> str:
-    """Build S3 prefix for listing. Org admins see the whole org."""
-    if auth.is_org_admin and "/" in auth.public_key:
-        org = auth.public_key.split("/", 1)[0]
-        prefix = f"{org}/"
+    """Build S3 prefix for listing.
+
+    SUPER_ADMIN sees all logs, others are scoped to their group.
+    """
+    if auth.is_super_admin:
+        prefix = ""
+    elif "/" in auth.public_key:
+        group = auth.public_key.split("/", 1)[0]
+        prefix = f"{group}/"
     else:
         prefix = f"{auth.public_key}/"
     if s3_cfg.key_prefix:
