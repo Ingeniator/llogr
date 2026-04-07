@@ -1,11 +1,11 @@
 import json
-from io import BytesIO
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from llogr.auth import AuthContext
-from llogr.config import S3Config, Settings
+from llogr.config import S3Config, Settings, get_settings
+from llogr.main import app
 from llogr.routes.media import _blob_key, _meta_key
 
 
@@ -42,6 +42,13 @@ def settings(s3_cfg: S3Config) -> Settings:
     return Settings(s3=s3_cfg)
 
 
+@pytest.fixture(autouse=True)
+def _override_settings(settings: Settings):
+    app.dependency_overrides[get_settings] = lambda: settings
+    yield
+    app.dependency_overrides.pop(get_settings, None)
+
+
 @pytest.fixture
 def auth() -> AuthContext:
     return AuthContext(public_key="pk-test", secret_key="sk-test")
@@ -56,12 +63,9 @@ def _mock_s3_client(*, head_returns_none: bool = True, meta_body: dict | None = 
     )
 
     if head_returns_none:
-        err = mock_client.exceptions.ClientError
-        err.side_effect = None
         exc = type("ClientError", (Exception,), {})()
         exc.response = {"Error": {"Code": "404"}}
         mock_client.head_object = AsyncMock(side_effect=exc)
-        # Make exceptions.ClientError match the exception type
         mock_client.exceptions.ClientError = type(exc)
     else:
         mock_client.head_object = AsyncMock(return_value={"ContentLength": 1024})
@@ -84,7 +88,7 @@ def _mock_s3_client(*, head_returns_none: bool = True, meta_body: dict | None = 
 # ---------------------------------------------------------------------------
 
 
-def test_post_media_returns_upload_url(client, auth_headers):
+def test_post_media_returns_upload_url(client, auth_headers, s3_cfg):
     session, mock_client = _mock_s3_client(head_returns_none=True)
     with patch("llogr.routes.media._s3_session", return_value=session):
         resp = client.post("/api/public/media", json=UPLOAD_BODY, headers=auth_headers)
@@ -108,10 +112,7 @@ def test_post_media_returns_upload_url(client, auth_headers):
         "put_object",
         Params={
             "Bucket": BUCKET,
-            "Key": _blob_key("pk-test", MEDIA_ID, S3Config(
-                bucket=BUCKET, region=REGION, endpoint="http://minio:9000",
-                access_key_id="testing", secret_access_key="testing",
-            )),
+            "Key": _blob_key("pk-test", MEDIA_ID, s3_cfg),
             "ContentType": "image/png",
         },
         ExpiresIn=PRESIGN_EXPIRY,
@@ -154,12 +155,9 @@ def test_post_media_public_endpoint_replacement(client, auth_headers):
         secret_access_key="testing",
         public_endpoint="https://s3.example.com",
     )
-    settings = Settings(s3=cfg)
+    app.dependency_overrides[get_settings] = lambda: Settings(s3=cfg)
 
-    with (
-        patch("llogr.routes.media._s3_session", return_value=session),
-        patch("llogr.routes.media.get_settings", return_value=settings),
-    ):
+    with patch("llogr.routes.media._s3_session", return_value=session):
         resp = client.post("/api/public/media", json=UPLOAD_BODY, headers=auth_headers)
 
     assert resp.status_code == 200
