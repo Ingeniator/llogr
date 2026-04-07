@@ -13,6 +13,7 @@ from starlette.responses import Response as StarletteResponse
 from llogr.config import get_settings
 from llogr.routes.ingestion import router as ingestion_router
 from llogr.routes.logs import router as logs_router
+from llogr.routes.media import router as media_router
 from llogr.routes.otel import router as otel_router
 from llogr.routes.search import router as search_router
 from llogr.routes.ui import router as ui_router
@@ -53,6 +54,7 @@ async def _startup():
         from llogr.clickhouse import ensure_table
         await ensure_table(settings)
 app.include_router(ingestion_router)
+app.include_router(media_router)
 app.include_router(otel_router)
 app.include_router(logs_router)
 app.include_router(search_router)
