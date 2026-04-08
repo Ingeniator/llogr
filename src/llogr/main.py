@@ -42,17 +42,34 @@ app.add_middleware(RequestIDMiddleware)
 
 @app.on_event("startup")
 async def _startup():
-    if "s3" in settings.features.store_backends:
-        from llogr.s3 import ensure_bucket
-        await ensure_bucket(settings)
+    import resource
+    import sys
 
-    needs_ch = (
-        "clickhouse" in settings.features.store_backends
-        or settings.features.search_backend == "clickhouse"
-    )
-    if needs_ch and settings.clickhouse.url:
-        from llogr.clickhouse import ensure_table
-        await ensure_table(settings)
+    pid = os.getpid()
+    logger = structlog.get_logger().bind(module="startup", pid=pid)
+
+    try:
+        if "s3" in settings.features.store_backends:
+            from llogr.s3 import ensure_bucket
+            await ensure_bucket(settings)
+
+        needs_ch = (
+            "clickhouse" in settings.features.store_backends
+            or settings.features.search_backend == "clickhouse"
+        )
+        if needs_ch and settings.clickhouse.url:
+            from llogr.clickhouse import ensure_table
+            await ensure_table(settings)
+    except Exception:
+        logger.exception("startup_failed")
+        raise
+
+    usage = resource.getrusage(resource.RUSAGE_SELF)
+    if sys.platform == "linux":
+        rss_mb = usage.ru_maxrss / 1024
+    else:
+        rss_mb = usage.ru_maxrss / (1024 * 1024)
+    logger.info("worker_ready", rss_mb=round(rss_mb, 1), workers=settings.server.workers)
 app.include_router(ingestion_router)
 app.include_router(media_router)
 app.include_router(otel_router)

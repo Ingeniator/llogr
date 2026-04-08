@@ -18,7 +18,8 @@ dependencies = [
     "protobuf>=5.0.0",
     "duckdb>=1.5.1",
     "duckdb-extensions",
-    "duckdb-extension-httpfs"
+    "duckdb-extension-httpfs",
+    "jinja2>=3.1.6"
 ]
 
 [build-system]

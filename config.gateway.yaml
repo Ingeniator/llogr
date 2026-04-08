@@ -14,6 +14,7 @@ clickstream:
 server:
   root_path: "/llogr"
   hide_auth_inputs: true
+  workers: 4
 features:
   store_backends:
   - s3

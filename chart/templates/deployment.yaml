@@ -34,6 +34,9 @@ spec:
               port: http
             initialDelaySeconds: 3
             periodSeconds: 5
+          env:
+            - name: PROMETHEUS_MULTIPROC_DIR
+              value: /tmp/prometheus_multiproc
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
@@ -41,7 +44,12 @@ spec:
               mountPath: /app/config.yaml
               subPath: config.yaml
               readOnly: true
+            - name: tmp
+              mountPath: /tmp
       volumes:
         - name: config
           secret:
             secretName: {{ include "llogr.secretName" . }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
