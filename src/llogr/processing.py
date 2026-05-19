@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import structlog
 
 from llogr.auth import AuthContext
@@ -53,6 +54,10 @@ async def ingest(
         except Exception:
             logger.exception("store_clickstream_failed")
             failed.append("clickstream")
+
+    for target in settings.features.forward:
+        from llogr.forward import forward_batch
+        asyncio.create_task(forward_batch(batch, auth, target))
 
     EVENTS_INGESTED.labels(project_id=auth.public_key).inc(len(batch))
     logger.info("ingest_complete", events=len(batch), targets=stored_to, failed=failed)

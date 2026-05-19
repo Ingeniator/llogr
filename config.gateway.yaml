@@ -22,6 +22,10 @@ features:
   - clickstream
   search_enabled: true
   search_backend: "clickhouse"
+  forward:
+  - url: "http://langfuse-web:3000"
+    pass_auth: true
+    timeout: 10
 clickhouse:
   url: "http://clickhouse:8123"
   database: "default"

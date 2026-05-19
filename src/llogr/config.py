@@ -94,6 +94,13 @@ class ClickHouseConfig:
 
 
 @dataclass(frozen=True)
+class ForwardTargetConfig:
+    url: str
+    pass_auth: bool = True  # forward original Authorization header unchanged
+    timeout: int = 10
+
+
+@dataclass(frozen=True)
 class FeaturesConfig:
     # Store backends — where to send events on ingestion
     # Any combination of: "s3", "clickhouse", "clickstream"
@@ -102,6 +109,8 @@ class FeaturesConfig:
     search_enabled: bool = False
     search_backend: str = "duckdb"  # "duckdb" or "clickhouse"
     duckdb_temp_dir: str = "/tmp/duckdb_temp"
+    # Fan-out: forward batches to additional targets after storing
+    forward: tuple[ForwardTargetConfig, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -138,8 +147,16 @@ def load_config(path: str | Path) -> Settings:
         clickstream=ClickstreamConfig(**raw.get("clickstream", {})),
         server=ServerConfig(**raw.get("server", {})),
         features=FeaturesConfig(**{
-            **raw.get("features", {}),
+            **{k: v for k, v in raw.get("features", {}).items() if k not in ("store_backends", "forward")},
             "store_backends": tuple(raw.get("features", {}).get("store_backends", ("s3",))),
+            "forward": tuple(
+                ForwardTargetConfig(
+                    url=t["url"],
+                    pass_auth=t.get("pass_auth", True),
+                    timeout=t.get("timeout", 10),
+                )
+                for t in raw.get("features", {}).get("forward", [])
+            ),
         }),
         clickhouse=ClickHouseConfig(**raw.get("clickhouse", {})),
     )
