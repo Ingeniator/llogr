@@ -211,3 +211,52 @@ async def search_logs_ch(
     except Exception as e:
         logger.error("clickhouse_search_failed", error=str(e))
         return []
+
+
+async def export_generations_ch(
+    project_id: str,
+    settings: Settings,
+    start: datetime,
+    end: datetime,
+    is_org_admin: bool = False,
+):
+    """Async generator: stream generation-create events as JSON lines."""
+    cfg = settings.clickhouse
+    if not cfg.url:
+        return
+
+    if is_org_admin and "/" in project_id:
+        org = project_id.split("/", 1)[0]
+        conditions = ["project_id LIKE {project_id:String}"]
+        params = {"project_id": f"{org}/%"}
+    else:
+        conditions = ["project_id = {project_id:String}"]
+        params = {"project_id": project_id}
+
+    conditions.append("event_type = 'generation-create'")
+    conditions.append("timestamp >= {start:String}")
+    params["start"] = start.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+    conditions.append("timestamp <= {end:String}")
+    params["end"] = end.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+
+    where = " AND ".join(conditions)
+    sql = (
+        f"SELECT event_id, timestamp, project_id, model, name, trace_id, session_id, body "
+        f"FROM {cfg.database}.{cfg.table} "
+        f"WHERE {where} "
+        f"ORDER BY timestamp ASC "
+        f"FORMAT JSONEachRow"
+    )
+
+    ch_params = {**_ch_params(cfg), "query": sql}
+    ch_params.update({f"param_{k}": v for k, v in params.items()})
+
+    try:
+        async with httpx.AsyncClient(timeout=None) as client:
+            async with client.stream("POST", _ch_url(cfg), params=ch_params) as resp:
+                resp.raise_for_status()
+                async for line in resp.aiter_lines():
+                    if line.strip():
+                        yield line + "\n"
+    except Exception as e:
+        logger.error("clickhouse_export_failed", error=str(e))

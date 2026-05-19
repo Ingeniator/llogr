@@ -11,6 +11,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response as StarletteResponse
 
 from llogr.config import get_settings
+from llogr.routes.export import router as export_router
 from llogr.routes.ingestion import router as ingestion_router
 from llogr.routes.logs import router as logs_router
 from llogr.routes.media import router as media_router
@@ -71,6 +72,7 @@ async def _startup():
         rss_mb = usage.ru_maxrss / (1024 * 1024)
     logger.info("worker_ready", rss_mb=round(rss_mb, 1), workers=settings.server.workers)
 app.include_router(ingestion_router)
+app.include_router(export_router)
 app.include_router(media_router)
 app.include_router(otel_router)
 app.include_router(logs_router)
