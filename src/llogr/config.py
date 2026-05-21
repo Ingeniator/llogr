@@ -98,6 +98,8 @@ class ForwardTargetConfig:
     url: str
     pass_auth: bool = True  # forward original Authorization header unchanged
     timeout: int = 10
+    public_key: str = ""    # target-specific credentials (e.g. Langfuse pk-*)
+    secret_key: str = ""    # takes precedence over pass_auth when set
 
 
 @dataclass(frozen=True)
@@ -111,6 +113,8 @@ class FeaturesConfig:
     duckdb_temp_dir: str = "/tmp/duckdb_temp"
     # Fan-out: forward batches to additional targets after storing
     forward: tuple[ForwardTargetConfig, ...] = ()
+    # Optional URL shown as a "Langfuse" tab in the log browser (gateway-relative, e.g. "/langfuse/")
+    langfuse_ui_url: str = ""
 
 
 @dataclass(frozen=True)
@@ -154,6 +158,8 @@ def load_config(path: str | Path) -> Settings:
                     url=t["url"],
                     pass_auth=t.get("pass_auth", True),
                     timeout=t.get("timeout", 10),
+                    public_key=t.get("public_key", ""),
+                    secret_key=t.get("secret_key", ""),
                 )
                 for t in raw.get("features", {}).get("forward", [])
             ),

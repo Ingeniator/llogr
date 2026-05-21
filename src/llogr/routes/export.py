@@ -19,6 +19,7 @@ router = APIRouter()
 async def export_generations(
     start: datetime = Query(..., description="Export window start (ISO 8601)"),
     end: datetime = Query(..., description="Export window end (ISO 8601)"),
+    session_id: str = Query(default="", description="Filter to a single session"),
     auth: AuthContext = Depends(get_auth),
     settings: Settings = Depends(get_settings),
 ):
@@ -54,6 +55,7 @@ async def export_generations(
             start=start,
             end=end,
             is_org_admin=auth.is_org_admin,
+            session_id=session_id or None,
         ),
         media_type="application/x-ndjson",
         headers={"Content-Disposition": 'attachment; filename="export.jsonl"'},

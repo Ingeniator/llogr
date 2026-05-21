@@ -20,7 +20,10 @@ async def forward_batch(
 ) -> None:
     """POST batch to target URL. Errors are logged and swallowed — never propagated."""
     headers: dict[str, str] = {"Content-Type": "application/json"}
-    if target.pass_auth:
+    if target.public_key:
+        creds = base64.b64encode(f"{target.public_key}:{target.secret_key}".encode()).decode()
+        headers["Authorization"] = f"Basic {creds}"
+    elif target.pass_auth:
         creds = base64.b64encode(f"{auth.public_key}:{auth.secret_key}".encode()).decode()
         headers["Authorization"] = f"Basic {creds}"
 

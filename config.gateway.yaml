@@ -24,8 +24,11 @@ features:
   search_backend: "clickhouse"
   forward:
   - url: "http://langfuse-web:3000"
-    pass_auth: true
+    pass_auth: false
+    public_key: "vault:LANGFUSE_PUBLIC_KEY"
+    secret_key: "vault:LANGFUSE_SECRET_KEY"
     timeout: 10
+  langfuse_ui_url: "http://localhost:3031"
 clickhouse:
   url: "http://clickhouse:8123"
   database: "default"

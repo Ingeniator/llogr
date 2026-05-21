@@ -101,3 +101,28 @@ async def test_forward_logs_but_does_not_raise_on_5xx(respx_mock):
     )
     # Should complete without raising
     await forward_batch([_EVENT], _AUTH, _TARGET)
+
+
+@pytest.mark.asyncio
+async def test_forward_uses_target_credentials_over_pass_auth(respx_mock):
+    """When target has its own keypair, use those instead of the caller's auth."""
+    captured_headers = {}
+
+    def _capture(request):
+        captured_headers.update(dict(request.headers))
+        return httpx.Response(200)
+
+    target_with_creds = ForwardTargetConfig(
+        url="http://langfuse-web:3000",
+        pass_auth=True,  # pass_auth is ignored when target keys are set
+        public_key="pk-lf-test",
+        secret_key="sk-lf-test",
+        timeout=5,
+    )
+    respx_mock.post("http://langfuse-web:3000/api/public/ingestion").mock(side_effect=_capture)
+    # Caller auth has empty secret_key (nginx path)
+    nginx_auth = AuthContext(public_key="myorg/alice", secret_key="")
+    await forward_batch([_EVENT], nginx_auth, target_with_creds)
+
+    expected_creds = base64.b64encode(b"pk-lf-test:sk-lf-test").decode()
+    assert captured_headers.get("authorization") == f"Basic {expected_creds}"

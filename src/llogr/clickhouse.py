@@ -174,7 +174,7 @@ async def search_logs_ch(
 
     where = " AND ".join(conditions)
     sql = f"""
-        SELECT event_id, event_type, timestamp, project_id, model, name, trace_id, session_id, body
+        SELECT event_id, event_type, timestamp, project_id, model, name, trace_id, session_id, input_hash, body
         FROM {cfg.database}.{cfg.table}
         WHERE {where}
         ORDER BY timestamp DESC
@@ -205,6 +205,9 @@ async def search_logs_ch(
                 "id": row.get("event_id", ""),
                 "type": row.get("event_type", ""),
                 "timestamp": row.get("timestamp", ""),
+                "trace_id": row.get("trace_id", ""),
+                "session_id": row.get("session_id", ""),
+                "input_hash": row.get("input_hash", ""),
                 "body": body,
             })
         return results
@@ -219,6 +222,7 @@ async def export_generations_ch(
     start: datetime,
     end: datetime,
     is_org_admin: bool = False,
+    session_id: str | None = None,
 ):
     """Async generator: stream generation-create events as JSON lines."""
     cfg = settings.clickhouse
@@ -238,6 +242,10 @@ async def export_generations_ch(
     params["start"] = start.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
     conditions.append("timestamp <= {end:String}")
     params["end"] = end.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+
+    if session_id:
+        conditions.append("session_id = {session_id:String}")
+        params["session_id"] = session_id
 
     where = " AND ".join(conditions)
     sql = (
@@ -260,3 +268,128 @@ async def export_generations_ch(
                         yield line + "\n"
     except Exception as e:
         logger.error("clickhouse_export_failed", error=str(e))
+
+
+async def list_sessions_ch(
+    project_id: str,
+    settings: Settings,
+    start: datetime,
+    end: datetime,
+    is_org_admin: bool = False,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict:
+    """Return a page of sessions with aggregated stats."""
+    cfg = settings.clickhouse
+    if not cfg.url:
+        return {"sessions": []}
+
+    if is_org_admin and "/" in project_id:
+        org = project_id.split("/", 1)[0]
+        conditions = ["project_id LIKE {project_id:String}"]
+        params: dict[str, str] = {"project_id": f"{org}/%"}
+    else:
+        conditions = ["project_id = {project_id:String}"]
+        params = {"project_id": project_id}
+
+    conditions += [
+        "event_type = 'generation-create'",
+        "session_id != ''",
+        "timestamp >= {start:String}",
+        "timestamp <= {end:String}",
+    ]
+    params["start"] = start.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+    params["end"] = end.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+
+    where = " AND ".join(conditions)
+    sql = f"""
+        SELECT
+            session_id,
+            project_id,
+            toString(min(timestamp)) AS started_at,
+            toString(max(timestamp)) AS last_event_at,
+            count() AS event_count,
+            groupUniqArray(model) AS models
+        FROM {cfg.database}.{cfg.table}
+        WHERE {where}
+        GROUP BY session_id, project_id
+        ORDER BY last_event_at DESC
+        LIMIT {min(limit, 200)} OFFSET {offset}
+        FORMAT JSON
+    """
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                _ch_url(cfg),
+                params={**_ch_params(cfg), "query": sql, **{f"param_{k}": v for k, v in params.items()}},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        return {"sessions": data.get("data", [])}
+    except Exception as e:
+        logger.error("clickhouse_list_sessions_failed", error=str(e))
+        return {"sessions": []}
+
+
+async def get_session_traces_ch(
+    project_id: str,
+    settings: Settings,
+    session_id: str,
+    is_org_admin: bool = False,
+) -> list[dict]:
+    """Return all generation events for a single session."""
+    cfg = settings.clickhouse
+    if not cfg.url:
+        return []
+
+    if is_org_admin and "/" in project_id:
+        org = project_id.split("/", 1)[0]
+        conditions = ["project_id LIKE {project_id:String}"]
+        params: dict[str, str] = {"project_id": f"{org}/%"}
+    else:
+        conditions = ["project_id = {project_id:String}"]
+        params = {"project_id": project_id}
+
+    conditions += [
+        "event_type = 'generation-create'",
+        "session_id = {session_id:String}",
+    ]
+    params["session_id"] = session_id
+
+    where = " AND ".join(conditions)
+    sql = f"""
+        SELECT event_id, timestamp, project_id, model, trace_id, session_id, body
+        FROM {cfg.database}.{cfg.table}
+        WHERE {where}
+        ORDER BY timestamp ASC
+        FORMAT JSON
+    """
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                _ch_url(cfg),
+                params={**_ch_params(cfg), "query": sql, **{f"param_{k}": v for k, v in params.items()}},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        results = []
+        for row in data.get("data", []):
+            try:
+                body = json.loads(row.get("body", "{}"))
+            except (json.JSONDecodeError, TypeError):
+                body = {}
+            results.append({
+                "event_id": row.get("event_id", ""),
+                "timestamp": row.get("timestamp", ""),
+                "project_id": row.get("project_id", ""),
+                "model": row.get("model", ""),
+                "session_id": row.get("session_id", ""),
+                "trace_id": row.get("trace_id", ""),
+                "body": body,
+            })
+        return results
+    except Exception as e:
+        logger.error("clickhouse_session_traces_failed", error=str(e))
+        return []

@@ -17,6 +17,7 @@ from llogr.routes.logs import router as logs_router
 from llogr.routes.media import router as media_router
 from llogr.routes.otel import router as otel_router
 from llogr.routes.search import router as search_router
+from llogr.routes.sessions import router as sessions_router
 from llogr.routes.ui import router as ui_router
 
 settings = get_settings()
@@ -77,6 +78,7 @@ app.include_router(media_router)
 app.include_router(otel_router)
 app.include_router(logs_router)
 app.include_router(search_router)
+app.include_router(sessions_router)
 app.include_router(ui_router)
 
 
@@ -224,4 +226,6 @@ def ui_config() -> dict:
         "search_enabled": settings.features.search_enabled,
         "search_backend": settings.features.search_backend if settings.features.search_enabled else None,
         "hide_auth_inputs": settings.server.hide_auth_inputs,
+        "s3_enabled": "s3" in settings.features.store_backends,
+        "langfuse_ui_url": settings.features.langfuse_ui_url or None,
     }

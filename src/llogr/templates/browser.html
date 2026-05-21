@@ -48,11 +48,21 @@
   .modal-close:hover { color: #333; }
   .modal-body { overflow: auto; padding: 16px; flex: 1; }
   .modal-body pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-size: .82rem; line-height: 1.5; }
-  .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: .75rem; font-weight: 500; background: #e0e7ff; color: #3730a3; margin-left: 8px; }
+  .badge { display: none; }
+  .tabs { display: flex; gap: 0; margin-bottom: 16px; border-bottom: 2px solid #e5e7eb; }
+  .tab { padding: 8px 24px; cursor: pointer; font-size: .9rem; font-weight: 600; color: #666; border-bottom: 2px solid transparent; margin-bottom: -2px; user-select: none; }
+  .tab:hover { color: #333; }
+  .tab.active { color: #2563eb; border-bottom-color: #2563eb; }
+  .tab.disabled { color: #ccc; cursor: not-allowed; pointer-events: none; }
 </style>
 </head>
 <body>
-<h1>llogr — log browser <span class="badge" id="modeBadge"></span></h1>
+<h1>llogr — log browser</h1>
+<div class="tabs" id="tabBar">
+  <div class="tab disabled" id="tab-clickhouse" onclick="switchTab('clickhouse')">ClickHouse</div>
+  <div class="tab disabled" id="tab-s3" onclick="switchTab('s3')">S3</div>
+  <div class="tab disabled" id="tab-langfuse">Langfuse ↗</div>
+</div>
 
 <div class="card" id="authCard">
   <div class="row">
@@ -118,6 +128,7 @@
 <script>
 const BASE = '{{ base_path }}';
 let uiMode = 's3'; // 's3' or 'events'
+let activeTab = 's3';
 let searchBackend = null;
 let currentEvents = []; // for events mode — holds loaded data
 let currentSearchKeys = []; // S3 keys from the last fulltext search scope
@@ -169,42 +180,66 @@ function authHeader() {
 }
 function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
+// ── Tabs ──
+function switchTab(tab) {
+  activeTab = tab;
+  uiMode = tab === 'clickhouse' ? 'events' : 's3';
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('tab-' + tab).classList.add('active');
+  document.getElementById('results').style.display = 'none';
+  document.getElementById('status').textContent = '';
+  renderMode();
+}
+
 // ── Init: detect mode ──
 async function init() {
+  let defaultTab = null;
   try {
     const resp = await fetch(BASE + '/api/public/ui-config');
     if (resp.ok) {
       const cfg = await resp.json();
-      if (cfg.hide_auth_inputs) {
-        document.getElementById('authCard').style.display = 'none';
-      }
+      if (cfg.hide_auth_inputs) document.getElementById('authCard').style.display = 'none';
+
       if (cfg.search_enabled && (cfg.search_backend === 'clickhouse' || cfg.search_backend === 'clickbeat')) {
-        uiMode = 'events';
         searchBackend = cfg.search_backend;
+        document.getElementById('tab-clickhouse').classList.remove('disabled');
+        defaultTab = 'clickhouse';
       } else if (cfg.search_enabled) {
         searchBackend = cfg.search_backend;
       }
+
+      const s3Tab = document.getElementById('tab-s3');
+      if (cfg.s3_enabled) {
+        s3Tab.classList.remove('disabled');
+        if (!defaultTab) defaultTab = 's3';
+      } else {
+        s3Tab.classList.add('disabled');
+      }
+
+      if (cfg.langfuse_ui_url) {
+        const lf = document.getElementById('tab-langfuse');
+        lf.classList.remove('disabled');
+        lf.onclick = () => { window.location.href = cfg.langfuse_ui_url; };
+      } else {
+        document.getElementById('tab-langfuse').classList.add('disabled');
+      }
     }
   } catch {}
-  renderMode();
+  switchTab(defaultTab || 's3');
 }
 
 function renderMode() {
-  const badge = document.getElementById('modeBadge');
   const actions = document.getElementById('actionButtons');
-  const s3Filters = uiMode === 's3';
 
-  document.getElementById('filterTraceType').style.display = s3Filters ? '' : 'none';
-  document.getElementById('filterInputHash').style.display = s3Filters ? '' : 'none';
+  document.getElementById('filterTraceType').style.display = '';
+  document.getElementById('filterInputHash').style.display = '';
 
   if (uiMode === 'events') {
-    badge.textContent = searchBackend;
     document.getElementById('searchRow').style.display = '';
     actions.innerHTML =
       '<button class="btn-primary" onclick="searchEvents()">Search</button>' +
       '<button class="btn-secondary" onclick="listEvents()">List recent</button>';
   } else {
-    badge.textContent = 's3';
     document.getElementById('searchRow').style.display = searchBackend ? '' : 'none';
     let btns = '<button class="btn-primary" onclick="loadLogs()">List files</button>';
     if (searchBackend) btns += '<button class="btn-primary" onclick="fullTextSearch()">Full-text search</button>';
@@ -223,8 +258,12 @@ function searchParams() {
   if (range.end) params.set('end', range.end);
   const s = document.getElementById('f_session').value.trim();
   const t = document.getElementById('f_trace').value.trim();
+  const h = document.getElementById('f_hash').value.trim();
+  const tt = document.getElementById('f_tracetype').value.trim();
   if (s) params.set('session_id', s);
   if (t) params.set('trace_id', t);
+  if (h) params.set('input_hash', h);
+  if (tt) params.set('trace_type', tt);
   return params;
 }
 
@@ -236,8 +275,6 @@ async function searchEvents() {
   const params = searchParams();
   params.set('q', q);
   params.set('limit', '100');
-  const tt = document.getElementById('f_tracetype')?.value.trim();
-  if (tt) params.set('trace_type', tt);
   try {
     const resp = await fetch(BASE + '/api/public/logs/search?' + params, {
       headers: { 'Authorization': authHeader() }
@@ -316,7 +353,7 @@ function outputPreview(body) {
 function renderEventsTable(events) {
   const thead = document.getElementById('thead');
   thead.innerHTML = '<tr><th><input type="checkbox" id="selectAll" onchange="toggleAll(this)"></th>' +
-    '<th>Timestamp</th><th>Model</th><th>Input</th><th>Output</th><th>Type</th><th></th></tr>';
+    '<th>Timestamp</th><th>Session ID</th><th>Trace ID</th><th>Input Hash</th><th>Model</th><th>Input</th><th>Output</th><th>Trace Type</th><th></th></tr>';
 
   const tbody = document.getElementById('tbody');
   tbody.innerHTML = '';
@@ -334,6 +371,9 @@ function renderEventsTable(events) {
     tr.innerHTML =
       '<td><input type="checkbox" class="sel" data-idx="' + i + '"></td>' +
       '<td>' + esc(ev.timestamp || '') + '</td>' +
+      '<td class="truncate">' + esc(ev.session_id || '-') + '</td>' +
+      '<td class="truncate">' + esc(ev.trace_id || '-') + '</td>' +
+      '<td>' + esc(ev.input_hash || '-') + '</td>' +
       '<td>' + esc(b.model || '-') + '</td>' +
       '<td class="truncate" title="' + esc(inputPreview(b)) + '">' + esc(inputPreview(b)) + '</td>' +
       '<td class="truncate" title="' + esc(outputPreview(b)) + '">' + esc(outputPreview(b)) + '</td>' +
@@ -605,7 +645,36 @@ function showModal(title, content) {
 function closeModal() { document.getElementById('modal').innerHTML = ''; }
 
 // Boot
-init();
+function parseUtc(s) {
+  // ClickHouse toString() returns "YYYY-MM-DD HH:MM:SS" with no timezone — treat as UTC.
+  if (!s) return null;
+  const hasZone = /[Z+\-]\d{2}:?\d{2}$/.test(s) || s.endsWith('Z');
+  return new Date(hasZone ? s : s.replace(' ', 'T') + 'Z');
+}
+
+async function applyUrlParams() {
+  const p = new URLSearchParams(window.location.search);
+  const sessionId = p.get('session_id');
+  const start = p.get('start');
+  const end = p.get('end');
+  if (!sessionId && !start) return;
+
+  if (sessionId) document.getElementById('f_session').value = sessionId;
+
+  if (start && end) {
+    customFrom = parseUtc(start).toISOString();
+    customTo   = parseUtc(end).toISOString();
+    timePreset = null;
+    const fmt = s => parseUtc(s).toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+    document.getElementById('timeLabel').textContent = fmt(start) + ' → ' + fmt(end);
+    document.querySelectorAll('#timePresets div').forEach(d => d.classList.remove('active'));
+  }
+
+  if (uiMode === 'events') await listEvents();
+  else await loadLogs();
+}
+
+init().then(applyUrlParams);
 </script>
 </body>
 </html>
