@@ -91,9 +91,9 @@
             <div onclick="setPreset('all','All time')">All time</div>
           </div>
           <div class="time-custom">
-            <label>From</label>
+            <label>From (UTC)</label>
             <input type="datetime-local" id="time_from">
-            <label>To</label>
+            <label>To (UTC)</label>
             <input type="datetime-local" id="time_to">
             <button class="btn-primary btn-sm" onclick="applyCustomRange()">Apply</button>
           </div>
@@ -154,9 +154,9 @@ function applyCustomRange() {
   const from = document.getElementById('time_from').value;
   const to = document.getElementById('time_to').value;
   if (!from || !to) return;
-  customFrom = new Date(from).toISOString(); customTo = new Date(to).toISOString();
+  customFrom = new Date(from + 'Z').toISOString(); customTo = new Date(to + 'Z').toISOString();
   timePreset = null;
-  document.getElementById('timeLabel').textContent = from.replace('T',' ') + '  \u2192  ' + to.replace('T',' ');
+  document.getElementById('timeLabel').textContent = from.replace('T',' ') + ' UTC  \u2192  ' + to.replace('T',' ') + ' UTC';
   document.querySelectorAll('#timePresets div').forEach(d => d.classList.remove('active'));
   document.getElementById('timeDropdown').classList.remove('open');
 }
