@@ -16,6 +16,7 @@ from llogr.routes.ingestion import router as ingestion_router
 from llogr.routes.logs import router as logs_router
 from llogr.routes.media import router as media_router
 from llogr.routes.otel import router as otel_router
+from llogr.routes.scores import router as scores_router
 from llogr.routes.search import router as search_router
 from llogr.routes.sessions import router as sessions_router
 from llogr.routes.ui import router as ui_router
@@ -73,6 +74,7 @@ async def _startup():
         rss_mb = usage.ru_maxrss / (1024 * 1024)
     logger.info("worker_ready", rss_mb=round(rss_mb, 1), workers=settings.server.workers)
 app.include_router(ingestion_router)
+app.include_router(scores_router)
 app.include_router(export_router)
 app.include_router(media_router)
 app.include_router(otel_router)
