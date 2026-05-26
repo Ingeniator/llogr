@@ -25,8 +25,8 @@ features:
   forward:
   - url: "http://langfuse-web:3000"
     pass_auth: false
-    public_key: "vault:LANGFUSE_PUBLIC_KEY"
-    secret_key: "vault:LANGFUSE_SECRET_KEY"
+    public_key: "lf-pk-ai-suite"
+    secret_key: "lf-sk-ai-suite"
     timeout: 10
   langfuse_ui_url: "http://localhost:3031"
 clickhouse:
