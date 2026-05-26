@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 from datetime import datetime, timezone
@@ -22,21 +23,56 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS {database}.{table} (
-    event_id     String,
-    event_type   String,
-    timestamp    DateTime64(3),
-    project_id   String,
-    model        String DEFAULT '',
-    name         String DEFAULT '',
-    trace_id     String DEFAULT '',
-    session_id   String DEFAULT '',
-    input_hash   String DEFAULT '',
-    body         String,
+    event_id      String,
+    event_type    String,
+    timestamp     DateTime64(3),
+    project_id    String,
+    model         String                    DEFAULT '',
+    name          String                    DEFAULT '',
+    trace_id      String                    DEFAULT '',
+    session_id    String                    DEFAULT '',
+    input_hash    String                    DEFAULT '',
+    body          String,
+    -- promoted fields (added via migrations for existing tables)
+    start_time    DateTime64(3)             DEFAULT toDateTime64(0, 3),
+    end_time      DateTime64(3)             DEFAULT toDateTime64(0, 3),
+    duration_ms   Float64                   DEFAULT 0,
+    provider      LowCardinality(String)    DEFAULT '',
+    input_tokens  UInt32                    DEFAULT 0,
+    output_tokens UInt32                    DEFAULT 0,
+    total_tokens  UInt32                    DEFAULT 0,
+    cost          Float64                   DEFAULT 0,
+    finish_reason LowCardinality(String)    DEFAULT '',
+    -- search / retrieval fields
+    retrieval_query String                  DEFAULT '',
+    result_count    UInt32                  DEFAULT 0,
+    -- span linkage
+    parent_span_id  String                  DEFAULT '',
+    -- prompt identity: SHA-256[:8] of system messages (stable across turns on the same template)
+    prompt_hash     String                  DEFAULT '',
     INDEX idx_body body TYPE tokenbf_v1(10240, 3, 0) GRANULARITY 4
 ) ENGINE = MergeTree()
 ORDER BY (project_id, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 90 DAY
 """
+
+# Each entry is applied once via ALTER TABLE ADD COLUMN IF NOT EXISTS.
+# Append-only — never remove or reorder rows.
+_COLUMN_MIGRATIONS: list[tuple[str, str]] = [
+    ("start_time",    "DateTime64(3)          DEFAULT toDateTime64(0, 3)"),
+    ("end_time",      "DateTime64(3)          DEFAULT toDateTime64(0, 3)"),
+    ("duration_ms",   "Float64                DEFAULT 0"),
+    ("provider",      "LowCardinality(String) DEFAULT ''"),
+    ("input_tokens",  "UInt32                 DEFAULT 0"),
+    ("output_tokens", "UInt32                 DEFAULT 0"),
+    ("total_tokens",  "UInt32                 DEFAULT 0"),
+    ("cost",          "Float64                DEFAULT 0"),
+    ("finish_reason",    "LowCardinality(String) DEFAULT ''"),
+    ("retrieval_query",  "String                 DEFAULT ''"),
+    ("result_count",     "UInt32                 DEFAULT 0"),
+    ("parent_span_id",   "String                 DEFAULT ''"),
+    ("prompt_hash",      "String                 DEFAULT ''"),
+]
 
 
 def _ch_url(cfg: ClickHouseConfig) -> str:
@@ -53,7 +89,7 @@ def _ch_params(cfg: ClickHouseConfig) -> dict:
 
 
 async def ensure_table(settings: Settings) -> None:
-    """Create the ClickHouse table if it doesn't exist."""
+    """Create the ClickHouse table if it doesn't exist, then apply column migrations."""
     cfg = settings.clickhouse
     if not cfg.url:
         return
@@ -68,6 +104,172 @@ async def ensure_table(settings: Settings) -> None:
         logger.info("clickhouse_table_ready", table=f"{cfg.database}.{cfg.table}")
     except Exception as e:
         logger.error("clickhouse_ensure_table_failed", error=str(e))
+        return
+
+    # Apply any column additions that don't exist yet (idempotent).
+    async with httpx.AsyncClient() as client:
+        for col_name, col_def in _COLUMN_MIGRATIONS:
+            alter = (
+                f"ALTER TABLE {cfg.database}.{cfg.table} "
+                f"ADD COLUMN IF NOT EXISTS {col_name} {col_def}"
+            )
+            try:
+                resp = await client.post(_ch_url(cfg), params={**_ch_params(cfg), "query": alter})
+                resp.raise_for_status()
+            except Exception as e:
+                logger.error("clickhouse_migration_failed", column=col_name, error=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Field extraction helpers — all are safe against missing / wrong-typed data
+# ---------------------------------------------------------------------------
+
+def _parse_ts(value: str | None) -> str | None:
+    """Return a ClickHouse-ready timestamp string (ms precision, no tz suffix) or None."""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+    except (ValueError, TypeError):
+        return None
+
+
+def _extract_start_time(body: dict, fallback_ts: str) -> str:
+    return _parse_ts(body.get("startTime")) or fallback_ts
+
+
+def _extract_end_time(body: dict, fallback_ts: str) -> str:
+    return _parse_ts(body.get("endTime")) or fallback_ts
+
+
+def _extract_duration_ms(body: dict) -> float:
+    meta = body.get("metadata")
+    if isinstance(meta, dict):
+        v = meta.get("duration_ms")
+        if v is not None:
+            try:
+                return float(v)
+            except (ValueError, TypeError):
+                pass
+    # Compute from start/end as fallback
+    st = _parse_ts(body.get("startTime"))
+    et = _parse_ts(body.get("endTime"))
+    if st and et:
+        try:
+            delta = datetime.fromisoformat(et) - datetime.fromisoformat(st)
+            return delta.total_seconds() * 1000
+        except (ValueError, TypeError):
+            pass
+    return 0.0
+
+
+def _extract_provider(body: dict) -> str:
+    meta = body.get("metadata")
+    if isinstance(meta, dict):
+        return str(meta.get("provider") or "")
+    return ""
+
+
+def _extract_tokens(body: dict) -> tuple[int, int, int]:
+    usage = body.get("usage")
+    if not isinstance(usage, dict):
+        usage = {}
+    inp = int(usage.get("input") or 0)
+    out = int(usage.get("output") or 0)
+    tot = int(usage.get("total") or 0)
+    if tot == 0 and (inp or out):
+        tot = inp + out
+    return inp, out, tot
+
+
+def _extract_cost(body: dict) -> float:
+    cd = body.get("costDetails")
+    if isinstance(cd, dict) and cd.get("total"):
+        try:
+            return float(cd["total"])
+        except (ValueError, TypeError):
+            pass
+    meta = body.get("metadata")
+    if isinstance(meta, dict) and meta.get("cost"):
+        try:
+            return float(meta["cost"])
+        except (ValueError, TypeError):
+            pass
+    return 0.0
+
+
+def _extract_finish_reason(body: dict) -> str:
+    output = body.get("output")
+    if not isinstance(output, dict):
+        return ""
+    choices = output.get("choices")
+    if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+        return str(choices[0].get("finish_reason") or "")
+    return ""
+
+
+def _extract_retrieval_query(body: dict) -> str:
+    """Extract a search/retrieval query from body.input.query (search spans)."""
+    inp = body.get("input")
+    if isinstance(inp, dict):
+        q = inp.get("query")
+        if q is not None:
+            return str(q)
+    return ""
+
+
+def _extract_result_count(body: dict) -> int:
+    """Extract search result count from body.output.result_count or metadata."""
+    output = body.get("output")
+    if isinstance(output, dict):
+        v = output.get("result_count")
+        if v is not None:
+            try:
+                return int(v)
+            except (ValueError, TypeError):
+                pass
+    meta = body.get("metadata")
+    if isinstance(meta, dict):
+        v = meta.get("num_results_returned")
+        if v is not None:
+            try:
+                return int(v)
+            except (ValueError, TypeError):
+                pass
+    return 0
+
+
+def _extract_parent_span_id(body: dict) -> str:
+    """Extract parent observation/span ID (present on child spans)."""
+    return str(body.get("parentObservationId") or body.get("parentSpanId") or "")
+
+
+def _extract_prompt_hash(body: dict) -> str:
+    """SHA-256[:8] of system messages — stable 'prompt version' surrogate.
+
+    Priority:
+      1. System messages from body.input.messages  →  hash their role+content
+      2. No system messages, but messages exist    →  hash model name (version proxy)
+      3. No messages at all (search/span)          →  empty string
+    """
+    inp = body.get("input")
+    if isinstance(inp, dict):
+        messages = inp.get("messages")
+        if isinstance(messages, list):
+            system_msgs = [
+                {"role": m["role"], "content": m.get("content", "")}
+                for m in messages
+                if isinstance(m, dict) and m.get("role") == "system"
+            ]
+            if system_msgs:
+                raw = json.dumps(system_msgs, sort_keys=True, ensure_ascii=False)
+                return hashlib.sha256(raw.encode()).hexdigest()[:8]
+            # messages present but no system role → hash model as version proxy
+            if messages:
+                model = str(body.get("model") or "")
+                if model:
+                    return hashlib.sha256(model.encode()).hexdigest()[:8]
+    return ""
 
 
 async def insert_events(
@@ -86,17 +288,32 @@ async def insert_events(
         body = ev.body
         # Normalize timestamp to "YYYY-MM-DDTHH:MM:SS.mmm" (no timezone suffix)
         ts = datetime.fromisoformat(ev.timestamp).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+        inp_tok, out_tok, tot_tok = _extract_tokens(body)
         rows.append(json.dumps({
-            "event_id": ev.id,
-            "event_type": ev.type,
-            "timestamp": ts,
-            "project_id": auth.public_key,
-            "model": body.get("model", "") or "",
-            "name": body.get("name", "") or "",
-            "trace_id": body.get("traceId", "") or "",
-            "session_id": body.get("sessionId", "") or "",
-            "input_hash": input_hash,
-            "body": json.dumps(body, default=str),
+            "event_id":     ev.id,
+            "event_type":   ev.type,
+            "timestamp":    ts,
+            "project_id":   auth.public_key,
+            "model":        body.get("model", "") or "",
+            "name":         body.get("name", "") or "",
+            "trace_id":     body.get("traceId", "") or "",
+            "session_id":   body.get("sessionId", "") or "",
+            "input_hash":   input_hash,
+            "body":         json.dumps(body, default=str),
+            # promoted fields
+            "start_time":    _extract_start_time(body, ts),
+            "end_time":      _extract_end_time(body, ts),
+            "duration_ms":   _extract_duration_ms(body),
+            "provider":      _extract_provider(body),
+            "input_tokens":  inp_tok,
+            "output_tokens": out_tok,
+            "total_tokens":  tot_tok,
+            "cost":            _extract_cost(body),
+            "finish_reason":   _extract_finish_reason(body),
+            "retrieval_query": _extract_retrieval_query(body),
+            "result_count":    _extract_result_count(body),
+            "parent_span_id":  _extract_parent_span_id(body),
+            "prompt_hash":     _extract_prompt_hash(body),
         }))
 
     data = "\n".join(rows)

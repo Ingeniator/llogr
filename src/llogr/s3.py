@@ -11,6 +11,19 @@ import structlog
 from botocore.config import Config as BotoConfig
 
 from llogr.auth import AuthContext
+from llogr.clickhouse import (
+    _extract_cost,
+    _extract_duration_ms,
+    _extract_end_time,
+    _extract_finish_reason,
+    _extract_parent_span_id,
+    _extract_prompt_hash,
+    _extract_provider,
+    _extract_result_count,
+    _extract_retrieval_query,
+    _extract_start_time,
+    _extract_tokens,
+)
 from llogr.config import S3Config, Settings
 from llogr.metrics import S3_SAVE_ERRORS, S3_SAVE_SECONDS
 from llogr.models import IngestionEvent
@@ -131,6 +144,40 @@ def sanitize_trace_type(name: str) -> str:
     return name.replace("_", "-")
 
 
+def _enrich_event(event: IngestionEvent, project_id: str, input_hash: str) -> dict:
+    """Return event.model_dump() extended with all promoted top-level fields.
+
+    Mirrors the column set written to ClickHouse so DuckDB can query S3 files
+    using direct field access instead of JSON path extraction.
+    """
+    d = event.model_dump()
+    body = event.body  # already a dict; model_dump() also embeds it under "body"
+
+    ts = datetime.fromisoformat(event.timestamp).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+    inp_tok, out_tok, tot_tok = _extract_tokens(body)
+
+    d["project_id"]      = project_id
+    d["input_hash"]      = input_hash
+    d["model"]           = body.get("model", "") or ""
+    d["name"]            = body.get("name", "") or ""
+    d["trace_id"]        = body.get("traceId", "") or ""
+    d["session_id"]      = body.get("sessionId", "") or ""
+    d["start_time"]      = _extract_start_time(body, ts)
+    d["end_time"]        = _extract_end_time(body, ts)
+    d["duration_ms"]     = _extract_duration_ms(body)
+    d["provider"]        = _extract_provider(body)
+    d["input_tokens"]    = inp_tok
+    d["output_tokens"]   = out_tok
+    d["total_tokens"]    = tot_tok
+    d["cost"]            = _extract_cost(body)
+    d["finish_reason"]   = _extract_finish_reason(body)
+    d["retrieval_query"] = _extract_retrieval_query(body)
+    d["result_count"]    = _extract_result_count(body)
+    d["parent_span_id"]  = _extract_parent_span_id(body)
+    d["prompt_hash"]     = _extract_prompt_hash(body)
+    return d
+
+
 @dataclass
 class KeyMeta:
     session_id: str
@@ -210,7 +257,8 @@ async def save_batch_to_s3(
         key = f"{s3_cfg.key_prefix.strip('/')}/{key}"
 
     body = "\n".join(
-        json.dumps(event.model_dump(), default=str) for event in batch
+        json.dumps(_enrich_event(event, auth.public_key, input_hash), default=str)
+        for event in batch
     )
 
     session = aioboto3.Session(
