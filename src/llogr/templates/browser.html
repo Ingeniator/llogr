@@ -241,8 +241,9 @@ function renderMode() {
       '<button class="btn-secondary" onclick="listEvents()">List recent</button>';
   } else {
     document.getElementById('searchRow').style.display = searchBackend ? '' : 'none';
-    let btns = '<button class="btn-primary" onclick="loadLogs()">List files</button>';
-    if (searchBackend) btns += '<button class="btn-primary" onclick="fullTextSearch()">Full-text search</button>';
+    let btns = '';
+    if (searchBackend) btns += '<button class="btn-primary" onclick="fullTextSearch()">Search</button>';
+    btns += '<button class="btn-secondary" onclick="loadLogs()">List recent</button>';
     actions.innerHTML = btns;
   }
 }
