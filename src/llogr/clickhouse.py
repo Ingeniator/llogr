@@ -42,6 +42,8 @@ CREATE TABLE IF NOT EXISTS {database}.{table} (
     output_tokens UInt32                    DEFAULT 0,
     total_tokens  UInt32                    DEFAULT 0,
     cost          Float64                   DEFAULT 0,
+    input_cost    Float64                   DEFAULT 0,
+    output_cost   Float64                   DEFAULT 0,
     finish_reason LowCardinality(String)    DEFAULT '',
     -- search / retrieval fields
     retrieval_query String                  DEFAULT '',
@@ -67,6 +69,8 @@ _COLUMN_MIGRATIONS: list[tuple[str, str]] = [
     ("output_tokens", "UInt32                 DEFAULT 0"),
     ("total_tokens",  "UInt32                 DEFAULT 0"),
     ("cost",          "Float64                DEFAULT 0"),
+    ("input_cost",    "Float64                DEFAULT 0"),
+    ("output_cost",   "Float64                DEFAULT 0"),
     ("finish_reason",    "LowCardinality(String) DEFAULT ''"),
     ("retrieval_query",  "String                 DEFAULT ''"),
     ("result_count",     "UInt32                 DEFAULT 0"),
@@ -182,20 +186,32 @@ def _extract_tokens(body: dict) -> tuple[int, int, int]:
     return inp, out, tot
 
 
-def _extract_cost(body: dict) -> float:
+def _extract_cost(body: dict) -> tuple[float, float, float]:
+    """Return (input_cost, output_cost, total_cost) from a generation event body."""
     cd = body.get("costDetails")
-    if isinstance(cd, dict) and cd.get("total"):
+    if isinstance(cd, dict):
         try:
-            return float(cd["total"])
+            inp = float(cd["input"]) if cd.get("input") is not None else 0.0
+            out = float(cd["output"]) if cd.get("output") is not None else 0.0
+            tot_raw = cd.get("total")
+            tot = float(tot_raw) if tot_raw is not None else inp + out
+            if inp or out or tot:
+                return inp, out, tot
         except (ValueError, TypeError):
             pass
+    # Fallback: metadata.cost carries only the total (legacy yallmp format)
     meta = body.get("metadata")
-    if isinstance(meta, dict) and meta.get("cost"):
+    if isinstance(meta, dict):
         try:
-            return float(meta["cost"])
+            inp = float(meta["input_cost"]) if meta.get("input_cost") is not None else 0.0
+            out = float(meta["output_cost"]) if meta.get("output_cost") is not None else 0.0
+            tot_raw = meta.get("cost")
+            tot = float(tot_raw) if tot_raw is not None else inp + out
+            if inp or out or tot:
+                return inp, out, tot
         except (ValueError, TypeError):
             pass
-    return 0.0
+    return 0.0, 0.0, 0.0
 
 
 def _extract_finish_reason(body: dict) -> str:
@@ -289,6 +305,7 @@ async def insert_events(
         # Normalize timestamp to "YYYY-MM-DDTHH:MM:SS.mmm" (no timezone suffix)
         ts = datetime.fromisoformat(ev.timestamp).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
         inp_tok, out_tok, tot_tok = _extract_tokens(body)
+        inp_cost, out_cost, tot_cost = _extract_cost(body)
         rows.append(json.dumps({
             "event_id":     ev.id,
             "event_type":   ev.type,
@@ -308,7 +325,9 @@ async def insert_events(
             "input_tokens":  inp_tok,
             "output_tokens": out_tok,
             "total_tokens":  tot_tok,
-            "cost":            _extract_cost(body),
+            "cost":          tot_cost,
+            "input_cost":    inp_cost,
+            "output_cost":   out_cost,
             "finish_reason":   _extract_finish_reason(body),
             "retrieval_query": _extract_retrieval_query(body),
             "result_count":    _extract_result_count(body),

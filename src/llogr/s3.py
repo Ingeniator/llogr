@@ -155,6 +155,7 @@ def _enrich_event(event: IngestionEvent, project_id: str, input_hash: str) -> di
 
     ts = datetime.fromisoformat(event.timestamp).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
     inp_tok, out_tok, tot_tok = _extract_tokens(body)
+    inp_cost, out_cost, tot_cost = _extract_cost(body)
 
     d["project_id"]      = project_id
     d["input_hash"]      = input_hash
@@ -169,7 +170,9 @@ def _enrich_event(event: IngestionEvent, project_id: str, input_hash: str) -> di
     d["input_tokens"]    = inp_tok
     d["output_tokens"]   = out_tok
     d["total_tokens"]    = tot_tok
-    d["cost"]            = _extract_cost(body)
+    d["cost"]            = tot_cost
+    d["input_cost"]      = inp_cost
+    d["output_cost"]     = out_cost
     d["finish_reason"]   = _extract_finish_reason(body)
     d["retrieval_query"] = _extract_retrieval_query(body)
     d["result_count"]    = _extract_result_count(body)
