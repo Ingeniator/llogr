@@ -14,7 +14,7 @@ logger = structlog.get_logger(__name__)
 async def ingest(
     batch: list[IngestionEvent],
     auth: AuthContext,
-    session_id: str = "none",
+    session_id: str = "",
     request_id: str = "",
 ) -> list[str]:
     """Store events to all configured backends. Returns list of failed backend names."""

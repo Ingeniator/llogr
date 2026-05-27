@@ -1,5 +1,7 @@
 """Tests with realistic Langfuse SDK payloads for each event type."""
 
+from unittest.mock import AsyncMock, call, patch
+
 from fastapi.testclient import TestClient
 
 
@@ -271,3 +273,50 @@ class TestBatchMetadata:
             headers=auth_headers,
         )
         assert resp.status_code == 207
+
+
+class TestSessionIdFallback:
+    """When no X-Session-Id header is sent, a fallback ID is auto-generated."""
+
+    def test_fallback_session_id_starts_with_fb(self, auth_headers: dict) -> None:
+        with patch("llogr.routes.ingestion.ingest", new_callable=AsyncMock, return_value=[]) as mock_ingest:
+            from llogr.main import app
+            client = TestClient(app)
+            resp = client.post(
+                "/api/public/ingestion",
+                json={"batch": [TRACE_CREATE]},
+                headers=auth_headers,  # no X-Session-Id header
+            )
+        assert resp.status_code == 207
+        _, kwargs = mock_ingest.call_args
+        assert kwargs["session_id"].startswith("fb-"), (
+            f"Expected fallback session_id to start with 'fb-', got: {kwargs['session_id']!r}"
+        )
+
+    def test_provided_session_id_is_kept(self, auth_headers: dict) -> None:
+        with patch("llogr.routes.ingestion.ingest", new_callable=AsyncMock, return_value=[]) as mock_ingest:
+            from llogr.main import app
+            client = TestClient(app)
+            resp = client.post(
+                "/api/public/ingestion",
+                json={"batch": [TRACE_CREATE]},
+                headers={**auth_headers, "X-Session-Id": "my-session-42"},
+            )
+        assert resp.status_code == 207
+        _, kwargs = mock_ingest.call_args
+        assert kwargs["session_id"] == "my-session-42"
+
+    def test_each_request_gets_unique_fallback(self, auth_headers: dict) -> None:
+        session_ids = []
+        with patch("llogr.routes.ingestion.ingest", new_callable=AsyncMock, return_value=[]) as mock_ingest:
+            from llogr.main import app
+            client = TestClient(app)
+            for _ in range(3):
+                client.post(
+                    "/api/public/ingestion",
+                    json={"batch": [TRACE_CREATE]},
+                    headers=auth_headers,
+                )
+                _, kwargs = mock_ingest.call_args
+                session_ids.append(kwargs["session_id"])
+        assert len(set(session_ids)) == 3, "Each request should get a unique fallback session ID"

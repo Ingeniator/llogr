@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import uuid
+
 from fastapi import APIRouter, Depends, Header
 from fastapi.responses import JSONResponse
 
@@ -14,10 +16,11 @@ router = APIRouter()
 async def ingest_endpoint(
     batch: IngestionBatch,
     auth: AuthContext = Depends(get_auth),
-    x_session_id: str = Header(default="none"),
+    x_session_id: str | None = Header(default=None),
     x_request_id: str = Header(default=""),
 ) -> JSONResponse:
-    failed = await ingest(batch.batch, auth, session_id=x_session_id, request_id=x_request_id)
+    session_id = x_session_id or f"fb-{uuid.uuid4().hex[:12]}"
+    failed = await ingest(batch.batch, auth, session_id=session_id, request_id=x_request_id)
     if failed:
         errors = [{"message": f"storage failed: {', '.join(failed)}"}]
         return JSONResponse(
