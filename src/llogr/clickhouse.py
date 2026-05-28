@@ -529,7 +529,7 @@ async def list_sessions_ch(
         params = {"project_id": project_id}
 
     conditions += [
-        "event_type = 'generation-create'",
+        "event_type IN ('generation-create', 'span-create')",
         "session_id != ''",
         "timestamp >= {start:String}",
         "timestamp <= {end:String}",
@@ -588,7 +588,7 @@ async def get_session_traces_ch(
         params = {"project_id": project_id}
 
     conditions += [
-        "event_type = 'generation-create'",
+        "event_type IN ('generation-create', 'span-create')",
         "session_id = {session_id:String}",
     ]
     params["session_id"] = session_id
