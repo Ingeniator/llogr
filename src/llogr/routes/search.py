@@ -39,6 +39,7 @@ async def search(
         end = end.replace(tzinfo=timezone.utc)
 
     backend = settings.features.search_backend
+    is_whitelisted_agent = bool(auth.is_super_admin and trace_type and trace_type in settings.features.agent_whitelist)
 
     if backend == "clickhouse":
         from llogr.clickhouse import search_logs_ch
@@ -47,6 +48,7 @@ async def search(
             query=q,
             project_id=auth.public_key,
             is_org_admin=auth.is_org_admin,
+            is_whitelisted_agent=is_whitelisted_agent,
             settings=settings,
             start=start, end=end,
             session_id=session_id, trace_id=trace_id,
@@ -60,6 +62,7 @@ async def search(
         auth, settings, start=start, end=end,
         session_id=session_id, trace_id=trace_id,
         trace_type=trace_type, input_hash=input_hash,
+        cross_org=is_whitelisted_agent,
     )
     keys = [f["key"] for f in keys_meta]
 

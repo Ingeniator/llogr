@@ -364,6 +364,7 @@ async def search_logs_ch(
     project_id: str,
     settings: Settings,
     is_org_admin: bool = False,
+    is_whitelisted_agent: bool = False,
     start: datetime | None = None,
     end: datetime | None = None,
     session_id: str | None = None,
@@ -377,7 +378,10 @@ async def search_logs_ch(
     if not cfg.url:
         return []
 
-    if is_org_admin and "/" in project_id:
+    if is_whitelisted_agent:
+        conditions: list[str] = []
+        params: dict[str, str] = {}
+    elif is_org_admin and "/" in project_id:
         org = project_id.split("/", 1)[0]
         conditions = ["project_id LIKE {project_id:String}"]
         params = {"project_id": f"{org}/%"}

@@ -22,6 +22,8 @@ features:
   - clickstream
   search_enabled: true
   search_backend: "clickhouse"
+  agent_whitelist:
+  - "research-assistant"
   forward:
   - url: "http://langfuse-web:3000"
     pass_auth: false

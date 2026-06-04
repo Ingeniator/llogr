@@ -216,12 +216,13 @@ def parse_key_meta(key: str) -> KeyMeta | None:
         return None
 
 
-def _list_prefix(auth: AuthContext, s3_cfg) -> str:
+def _list_prefix(auth: AuthContext, s3_cfg, cross_org: bool = False) -> str:
     """Build S3 prefix for listing.
 
-    SUPER_ADMIN sees all logs, others are scoped to their group.
+    SUPER_ADMIN or cross_org (whitelisted-agent query) sees all logs;
+    others are scoped to their group.
     """
-    if auth.is_super_admin:
+    if auth.is_super_admin or cross_org:
         prefix = ""
     elif "/" in auth.public_key:
         group = auth.public_key.split("/", 1)[0]
@@ -295,10 +296,11 @@ async def list_batch_keys(
     trace_id: str | None = None,
     input_hash: str | None = None,
     trace_type: str | None = None,
+    cross_org: bool = False,
 ) -> list[dict]:
     """List batch keys (metadata only, no presigned URLs)."""
     s3_cfg = settings.s3
-    prefix = _list_prefix(auth, s3_cfg)
+    prefix = _list_prefix(auth, s3_cfg, cross_org=cross_org)
 
     session = aioboto3.Session(
         aws_access_key_id=s3_cfg.access_key_id,

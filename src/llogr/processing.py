@@ -16,6 +16,7 @@ async def ingest(
     auth: AuthContext,
     session_id: str = "",
     request_id: str = "",
+    agent_name: str = "",
 ) -> list[str]:
     """Store events to all configured backends. Returns list of failed backend names."""
     settings = get_settings()
@@ -28,6 +29,13 @@ async def ingest(
         for event in batch:
             if not event.body.get("sessionId"):
                 event.body["sessionId"] = session_id
+
+    # Stamp agent_name onto events that have no name (or OTEL's "unknown" fallback)
+    if agent_name:
+        for event in batch:
+            name = event.body.get("name")
+            if not name or name == "unknown":
+                event.body["name"] = agent_name
 
     # Pre-compute shared metadata once
     from llogr.s3 import extract_input_hash

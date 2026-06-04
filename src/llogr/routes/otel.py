@@ -137,6 +137,7 @@ async def otel_ingest(
     request: Request,
     auth: AuthContext = Depends(get_auth),
     x_session_id: str = Header(default="none"),
+    x_agent_name: str = Header(default=""),
 ) -> Response:
     raw = await request.body()
     req = ExportTraceServiceRequest()
@@ -150,7 +151,7 @@ async def otel_ingest(
                 events.append(_span_to_event(span, attrs))
 
     if events:
-        await ingest(events, auth, session_id=x_session_id)
+        await ingest(events, auth, session_id=x_session_id, agent_name=x_agent_name)
 
     logger.info("otel_ingest", spans=len(events))
 

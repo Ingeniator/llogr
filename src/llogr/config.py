@@ -115,6 +115,8 @@ class FeaturesConfig:
     forward: tuple[ForwardTargetConfig, ...] = ()
     # Optional URL shown as a "Langfuse" tab in the log browser (gateway-relative, e.g. "/langfuse/")
     langfuse_ui_url: str = ""
+    # Agent names whose traces a super-admin can query across all users
+    agent_whitelist: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -154,6 +156,7 @@ def load_config(path: str | Path) -> Settings:
         features=FeaturesConfig(**{
             **{k: v for k, v in raw.get("features", {}).items() if k not in ("store_backends", "forward")},
             "store_backends": tuple(raw.get("features", {}).get("store_backends", ("s3",))),
+            "agent_whitelist": tuple(raw.get("features", {}).get("agent_whitelist", ())),
             "forward": tuple(
                 ForwardTargetConfig(
                     url=t["url"],
