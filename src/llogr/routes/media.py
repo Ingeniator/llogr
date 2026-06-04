@@ -99,7 +99,7 @@ async def get_upload_url(
     settings: Settings = Depends(get_settings),
 ) -> GetUploadUrlResponse:
     s3_cfg = settings.s3
-    media_id = body.sha256Hash[:22]
+    media_id = body.sha256Hash.replace("+", "-").replace("/", "_")[:22]
     blob = _blob_key(auth.public_key, media_id, s3_cfg)
     meta = _meta_key(auth.public_key, media_id, s3_cfg)
 
