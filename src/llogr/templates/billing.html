@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Billing — llogr</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; color: #333; }
+
+  /* Header */
+  .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 12px; }
+  .header h1 { font-size: 1.4rem; margin: 0; }
+  .header-left  { display: flex; align-items: center; gap: 12px; }
+  .header-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 0.85rem; color: #555; }
+
+  /* Role badge */
+  .role-badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 0.78rem; font-weight: 600; }
+  .role-badge.SUPER_ADMIN { background: #d94a68; color: #fff; }
+  .role-badge.ORG_ADMIN   { background: #2563eb; color: #fff; }
+  .role-badge.USER        { background: #16a34a; color: #fff; }
+
+  /* Period selector */
+  .period-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 24px; background: #fff; border-radius: 8px; padding: 12px 16px; box-shadow: 0 1px 3px rgba(0,0,0,.08); font-size: 0.85rem; }
+  .period-bar label { font-weight: 600; }
+  .period-bar select, .period-bar input { padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 0.85rem; }
+  .period-bar input[type="month"] { min-width: 140px; }
+  .period-bar input[type="datetime-local"] { min-width: 170px; }
+  #customRangeFields { display: none; gap: 6px; align-items: center; }
+
+  /* Summary cards */
+  .cards-row { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
+  .summary-card { flex: 1; min-width: 160px; background: #fff; border-radius: 8px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  .summary-card .sc-label { font-size: 0.75rem; color: #888; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .summary-card .sc-value { font-size: 1.5rem; font-weight: 700; color: #2563eb; }
+  .summary-card .sc-sub   { font-size: 0.78rem; color: #999; margin-top: 4px; }
+
+  /* Section */
+  .section { margin-bottom: 28px; }
+  .section-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .section-head h2 { font-size: 1.05rem; margin: 0; border-left: 3px solid #2563eb; padding-left: 8px; }
+
+  /* Group cards */
+  .group-grid { display: flex; gap: 14px; flex-wrap: wrap; }
+  .group-card { background: #fff; border-radius: 8px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.08); min-width: 200px; flex: 1; }
+  .group-card .gc-org   { font-weight: 700; font-size: 1rem; margin-bottom: 10px; }
+  .group-card .gc-total { font-size: 1.4rem; font-weight: 700; color: #2563eb; }
+  .group-card .gc-breakdown { display: flex; gap: 12px; margin-top: 8px; font-size: 0.8rem; color: #666; }
+  .group-card .gc-breakdown span { background: #f0f4ff; padding: 2px 7px; border-radius: 4px; }
+  .group-card .gc-reqs  { font-size: 0.78rem; color: #999; margin-top: 8px; }
+
+  /* My spend card */
+  .my-spend-card { background: #f0f7ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 16px; margin-bottom: 24px; }
+  .my-spend-card h3 { font-size: 0.9rem; margin: 0 0 10px; color: #1e40af; }
+  .my-spend-card .ms-total { font-size: 1.3rem; font-weight: 700; color: #1d4ed8; }
+  .my-spend-card .ms-breakdown { font-size: 0.8rem; color: #555; margin-top: 6px; }
+  .my-spend-card .ms-breakdown span { margin-right: 10px; }
+
+  /* Table */
+  .card { background: #fff; border-radius: 8px; padding: 0; box-shadow: 0 1px 3px rgba(0,0,0,.08); overflow: hidden; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  th, td { text-align: left; padding: 9px 14px; border-bottom: 1px solid #f0f0f0; }
+  th { background: #f9fafb; font-weight: 600; color: #555; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #f8faff; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* Pagination */
+  .load-more-bar { text-align: center; padding: 14px; }
+  button.btn { padding: 7px 16px; border: none; border-radius: 5px; font-size: 0.85rem; font-weight: 600; cursor: pointer; font-family: inherit; }
+  button.btn-primary   { background: #2563eb; color: #fff; }
+  button.btn-primary:hover { background: #1d4ed8; }
+  button.btn-secondary { background: #e5e7eb; color: #333; }
+  button.btn-secondary:hover { background: #d1d5db; }
+
+  /* Status */
+  .status-line { font-size: 0.8rem; color: #888; }
+  .empty-msg { color: #aaa; font-style: italic; text-align: center; padding: 20px; }
+  .error-msg { color: #b91c1c; font-size: 0.85rem; padding: 12px; background: #fef2f2; border-radius: 6px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left">
+    <h1>Billing</h1>
+    <span id="roleBadge" class="role-badge" style="display:none"></span>
+    <span id="orgLabel" style="font-size:0.85rem;color:#666"></span>
+  </div>
+  <div class="header-right">
+    <span id="statusLine" class="status-line"></span>
+    <button class="btn btn-secondary" id="refreshBtn" style="padding:5px 12px;font-size:0.8rem">Refresh</button>
+  </div>
+</div>
+
+<!-- Period selector -->
+<div class="period-bar">
+  <label for="periodMode">Period:</label>
+  <select id="periodMode">
+    <option value="current">Current month</option>
+    <option value="last">Last month</option>
+    <option value="custom">Custom range</option>
+  </select>
+  <span id="customRangeFields">
+    <input type="datetime-local" id="rangeStart" title="Start">
+    <span>–</span>
+    <input type="datetime-local" id="rangeEnd" title="End">
+  </span>
+  <span id="periodLabel" style="color:#888;font-size:0.8rem"></span>
+</div>
+
+<!-- Summary KPIs -->
+<div class="cards-row" id="summaryCards" style="display:none">
+  <div class="summary-card">
+    <div class="sc-label">Total Spend</div>
+    <div class="sc-value" id="kpiTotal">$0</div>
+    <div class="sc-sub" id="kpiOrgCount"></div>
+  </div>
+  <div class="summary-card">
+    <div class="sc-label">Input Cost</div>
+    <div class="sc-value" id="kpiInput">$0</div>
+    <div class="sc-sub">prompt tokens</div>
+  </div>
+  <div class="summary-card">
+    <div class="sc-label">Output Cost</div>
+    <div class="sc-value" id="kpiOutput">$0</div>
+    <div class="sc-sub">completion tokens</div>
+  </div>
+  <div class="summary-card">
+    <div class="sc-label">Requests</div>
+    <div class="sc-value" id="kpiRequests">0</div>
+    <div class="sc-sub">billable events</div>
+  </div>
+</div>
+
+<!-- My spend (current_user) -->
+<div class="my-spend-card" id="mySpendCard" style="display:none">
+  <h3 id="mySpendTitle">My spend</h3>
+  <div class="ms-total" id="mySpendTotal"></div>
+  <div class="ms-breakdown">
+    <span id="mySpendIn"></span>
+    <span id="mySpendOut"></span>
+    <span id="mySpendReqs"></span>
+  </div>
+</div>
+
+<!-- Groups -->
+<div class="section" id="groupsSection" style="display:none">
+  <div class="section-head">
+    <h2>Groups</h2>
+  </div>
+  <div class="group-grid" id="groupGrid"></div>
+</div>
+
+<!-- Users table (admins only, paginated) -->
+<div class="section" id="usersSection" style="display:none">
+  <div class="section-head">
+    <h2>Users</h2>
+    <span id="usersStatus" class="status-line"></span>
+  </div>
+  <div class="card">
+    <table id="usersTable">
+      <thead>
+        <tr>
+          <th>User</th>
+          <th class="num">Total (USD)</th>
+          <th class="num">Input (USD)</th>
+          <th class="num">Output (USD)</th>
+          <th class="num">Requests</th>
+        </tr>
+      </thead>
+      <tbody id="usersBody"></tbody>
+    </table>
+  </div>
+  <div class="load-more-bar" id="loadMoreBar" style="display:none">
+    <button class="btn btn-secondary" id="loadMoreBtn">Load more</button>
+  </div>
+</div>
+
+<div id="errorMsg" class="error-msg" style="display:none"></div>
+
+<script>
+(function () {
+  const BASE        = '{{ base_path }}';
+  const WHO_API     = BASE + '/api/public/billing/who';
+  const BILLING_API = BASE + '/api/public/billing/summary';
+  const PAGE_SIZE   = 500;
+
+  let currentRole    = 'USER';
+  let userOffset     = 0;
+  let hasMore        = false;
+  let currentParams  = {};   // {period} or {start, end}
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+
+  function esc(s) {
+    const d = document.createElement('div');
+    d.textContent = String(s == null ? '' : s);
+    return d.innerHTML;
+  }
+
+  function fmt$(n) {
+    return '$' + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 6 });
+  }
+
+  function fmtReqs(n) {
+    return Number(n || 0).toLocaleString();
+  }
+
+  function setStatus(msg) {
+    document.getElementById('statusLine').textContent = msg;
+  }
+
+  function showError(msg) {
+    const el = document.getElementById('errorMsg');
+    el.textContent = msg;
+    el.style.display = msg ? '' : 'none';
+  }
+
+  // ── Period helpers ─────────────────────────────────────────────────────────
+
+  function buildApiParams() {
+    const mode = document.getElementById('periodMode').value;
+    if (mode === 'current') {
+      return {};  // llogr defaults to current month
+    }
+    if (mode === 'last') {
+      const now   = new Date();
+      const year  = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
+      const month = now.getMonth() === 0 ? 12 : now.getMonth();
+      return { period: year + '-' + String(month).padStart(2, '0') };
+    }
+    // custom
+    const s = document.getElementById('rangeStart').value;
+    const e = document.getElementById('rangeEnd').value;
+    if (s && e) return { start: s.replace('T', 'T'), end: e.replace('T', 'T') };
+    return {};
+  }
+
+  function updatePeriodLabel(responseperiod) {
+    document.getElementById('periodLabel').textContent = responseperiod ? ('Period: ' + responseperiod) : '';
+  }
+
+  // ── Identity ───────────────────────────────────────────────────────────────
+
+  async function fetchWho() {
+    try {
+      const resp = await fetch(WHO_API);
+      if (!resp.ok) return;
+      const d = await resp.json();
+      currentRole = (d.role || 'USER').toUpperCase();
+
+      const badge = document.getElementById('roleBadge');
+      badge.textContent = currentRole.replace('_', ' ');
+      badge.className   = 'role-badge ' + currentRole;
+      badge.style.display = '';
+
+      if (d.org) document.getElementById('orgLabel').textContent = '(' + esc(d.org) + ')';
+    } catch (e) {
+      console.warn('who fetch error:', e);
+    }
+  }
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+
+  function renderSummaryKPIs(groups) {
+    let total = 0, input = 0, output = 0, reqs = 0;
+    groups.forEach(function (g) {
+      total  += Number(g.group_spent  || 0);
+      input  += Number(g.input_spent  || 0);
+      output += Number(g.output_spent || 0);
+      reqs   += Number(g.request_count || 0);
+    });
+    document.getElementById('kpiTotal').textContent    = fmt$(total);
+    document.getElementById('kpiInput').textContent    = fmt$(input);
+    document.getElementById('kpiOutput').textContent   = fmt$(output);
+    document.getElementById('kpiRequests').textContent = fmtReqs(reqs);
+    document.getElementById('kpiOrgCount').textContent =
+      groups.length === 1 ? '1 org' : groups.length + ' orgs';
+    document.getElementById('summaryCards').style.display = '';
+  }
+
+  function renderGroups(groups) {
+    const grid = document.getElementById('groupGrid');
+    if (!groups.length) {
+      grid.innerHTML = '<p class="empty-msg">No spend in this period.</p>';
+    } else {
+      grid.innerHTML = groups.map(function (g) {
+        return '<div class="group-card">' +
+          '<div class="gc-org">' + esc(g.org) + '</div>' +
+          '<div class="gc-total">' + fmt$(g.group_spent) + '</div>' +
+          '<div class="gc-breakdown">' +
+            '<span>in ' + fmt$(g.input_spent) + '</span>' +
+            '<span>out ' + fmt$(g.output_spent) + '</span>' +
+          '</div>' +
+          '<div class="gc-reqs">' + fmtReqs(g.request_count) + ' requests</div>' +
+        '</div>';
+      }).join('');
+    }
+    document.getElementById('groupsSection').style.display = '';
+  }
+
+  function renderMySpend(cu) {
+    if (!cu) { document.getElementById('mySpendCard').style.display = 'none'; return; }
+    document.getElementById('mySpendTitle').textContent = 'My spend — ' + cu.project_id;
+    document.getElementById('mySpendTotal').textContent = fmt$(cu.user_spent);
+    document.getElementById('mySpendIn').textContent    = 'in ' + fmt$(cu.input_spent);
+    document.getElementById('mySpendOut').textContent   = 'out ' + fmt$(cu.output_spent);
+    document.getElementById('mySpendReqs').textContent  = fmtReqs(cu.request_count) + ' requests';
+    document.getElementById('mySpendCard').style.display = '';
+  }
+
+  function appendUsers(users) {
+    const tbody = document.getElementById('usersBody');
+    if (!users.length && userOffset === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" class="empty-msg">No user data in this period.</td></tr>';
+      return;
+    }
+    users.forEach(function (u) {
+      const tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td>' + esc(u.project_id) + '</td>' +
+        '<td class="num">' + fmt$(u.user_spent)  + '</td>' +
+        '<td class="num">' + fmt$(u.input_spent)  + '</td>' +
+        '<td class="num">' + fmt$(u.output_spent) + '</td>' +
+        '<td class="num">' + fmtReqs(u.request_count) + '</td>';
+      tbody.appendChild(tr);
+    });
+  }
+
+  // ── Fetch ──────────────────────────────────────────────────────────────────
+
+  async function loadPage(reset) {
+    if (reset) {
+      userOffset = 0;
+      currentParams = buildApiParams();
+      document.getElementById('usersBody').innerHTML = '';
+    }
+
+    const params = new URLSearchParams(Object.assign({}, currentParams, {
+      user_limit:  PAGE_SIZE,
+      user_offset: userOffset,
+    }));
+
+    setStatus('Loading…');
+    showError('');
+
+    try {
+      const resp = await fetch(BILLING_API + '?' + params);
+      if (resp.status === 503) {
+        showError('Billing data requires ClickHouse. Configure clickhouse.url in llogr config.');
+        setStatus(''); return;
+      }
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const data = await resp.json();
+
+      if (reset) {
+        renderSummaryKPIs(data.groups || []);
+        renderGroups(data.groups || []);
+        renderMySpend(data.current_user || null);
+        updatePeriodLabel(data.period || '');
+      }
+
+      const isAdmin = currentRole === 'ORG_ADMIN' || currentRole === 'SUPER_ADMIN';
+      if (isAdmin) {
+        document.getElementById('usersSection').style.display = '';
+        document.getElementById('usersStatus').textContent =
+          userOffset === 0 ? '' : (userOffset + ' loaded');
+        appendUsers(data.users || []);
+        userOffset += (data.users || []).length;
+        hasMore = !!data.has_more;
+        document.getElementById('loadMoreBar').style.display = hasMore ? '' : 'none';
+      }
+
+      setStatus('Updated ' + new Date().toLocaleTimeString());
+    } catch (e) {
+      showError('Failed to load billing data: ' + e.message);
+      setStatus('');
+    }
+  }
+
+  // ── Events ─────────────────────────────────────────────────────────────────
+
+  document.getElementById('periodMode').addEventListener('change', function () {
+    const isCustom = this.value === 'custom';
+    document.getElementById('customRangeFields').style.display = isCustom ? 'flex' : 'none';
+    if (!isCustom) loadPage(true);
+  });
+
+  ['rangeStart', 'rangeEnd'].forEach(function (id) {
+    document.getElementById(id).addEventListener('change', function () {
+      const s = document.getElementById('rangeStart').value;
+      const e = document.getElementById('rangeEnd').value;
+      if (s && e) loadPage(true);
+    });
+  });
+
+  document.getElementById('refreshBtn').addEventListener('click', function () { loadPage(true); });
+  document.getElementById('loadMoreBtn').addEventListener('click', function () { loadPage(false); });
+
+  // ── Init ───────────────────────────────────────────────────────────────────
+
+  fetchWho().then(function () { loadPage(true); });
+})();
+</script>
+</body>
+</html>

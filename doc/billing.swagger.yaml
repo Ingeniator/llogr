@@ -1,0 +1,505 @@
+openapi: "3.0.3"
+info:
+  title: Billing API
+  version: "3.0"
+  description: |
+    Billing spend data for LLM and search requests — sourced from ClickHouse via llogr.
+
+    ## Architecture
+
+    | Component | Role |
+    |-----------|------|
+    | **llogr** (ClickHouse) | Source of truth — exact, auditable spend per event |
+    | **yallmp** (Redis) | Enforcement cache — seeded from llogr, used for hot-path limit checks |
+
+    yallmp's Redis cache is seeded from llogr on startup and refreshed every
+    `LLM_BILLING_SYNC_INTERVAL` seconds (default 300 s) using `SET ... GT` semantics
+    so counters are only ever raised, never lowered, relative to in-flight increments.
+
+    ## Identity headers
+
+    Caller identity is resolved from HTTP headers injected by the upstream gateway.
+
+    | Header | Description |
+    |--------|-------------|
+    | `X-Group-ID` | Caller identity: `org` or `org/user` (e.g. `acme/alice`) |
+    | `X-Role` | `USER` (default) · `ORG_ADMIN` · `SUPER_ADMIN` |
+
+    Direct callers (e.g. SDKs bypassing the gateway) may use HTTP Basic auth
+    instead of `X-Group-ID`.
+
+servers:
+  - url: /llogr
+    description: llogr — served via nginx /llogr/ proxy
+
+paths:
+
+  # ── llogr — source of truth ─────────────────────────────────────────────────
+
+  /api/public/billing/summary:
+    get:
+      summary: Billing summary (ClickHouse — source of truth)
+      description: |
+        Returns spend aggregated from ClickHouse for the requested time range.
+        Data is exact and auditable — every row corresponds to a stored
+        ingestion event with a `cost > 0` column.
+
+        **Period selection (mutually exclusive):**
+
+        | Params | Behaviour |
+        |--------|-----------|
+        | `period=YYYY-MM` | Full calendar month |
+        | `start` + `end` | Arbitrary ISO 8601 range |
+        | *(neither)* | Current calendar month |
+
+        **Visibility rules (controlled by `X-Role`):**
+
+        | Role | Groups returned | `users` populated | `current_user` |
+        |------|-----------------|-------------------|----------------|
+        | `USER` | Caller's org only | No (empty) | Yes, if `org/user` identity |
+        | `ORG_ADMIN` | All groups in caller's org | Yes, paginated | Yes |
+        | `SUPER_ADMIN` | All orgs | Yes, paginated | Yes |
+
+        **Pagination** applies to the `users` list only. Groups are always
+        returned in full. Iterate using `user_offset` while `has_more` is `true`.
+
+        Returns `503` when ClickHouse is not configured.
+      tags: [llogr]
+      parameters:
+        - name: X-Group-ID
+          in: header
+          required: false
+          description: Caller identity (`org` or `org/user`).
+          schema:
+            type: string
+          example: acme/alice
+        - name: X-Role
+          in: header
+          required: false
+          schema:
+            type: string
+            enum: [USER, ORG_ADMIN, SUPER_ADMIN]
+            default: USER
+          example: ORG_ADMIN
+        - name: Authorization
+          in: header
+          required: false
+          description: |
+            HTTP Basic auth fallback when `X-Group-ID` is not present.
+            Format: `Basic base64(public_key:secret_key)`.
+          schema:
+            type: string
+        - name: period
+          in: query
+          required: false
+          description: |
+            Full calendar month in `YYYY-MM` format.
+            Mutually exclusive with `start`/`end`.
+          schema:
+            type: string
+            pattern: '^\d{4}-\d{2}$'
+          example: "2026-06"
+        - name: start
+          in: query
+          required: false
+          description: |
+            Range start in ISO 8601 format. Requires `end`.
+            Timezone-naive values are treated as UTC.
+          schema:
+            type: string
+            format: date-time
+          example: "2026-06-01T00:00:00"
+        - name: end
+          in: query
+          required: false
+          description: |
+            Range end in ISO 8601 format. Requires `start`.
+            Must be after `start`.
+          schema:
+            type: string
+            format: date-time
+          example: "2026-06-30T23:59:59"
+        - name: user_limit
+          in: query
+          required: false
+          description: Maximum number of users returned per page.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 5000
+            default: 500
+        - name: user_offset
+          in: query
+          required: false
+          description: Offset into the users list for pagination.
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: Billing summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LlogrBillingSummary"
+              examples:
+                user_view:
+                  summary: USER — own org group total + own spend
+                  value:
+                    period: "2026-06"
+                    groups:
+                      - org: acme
+                        group_spent: 42.318450
+                        input_spent: 19.100000
+                        output_spent: 23.218450
+                        request_count: 1500
+                    users: []
+                    has_more: false
+                    current_user:
+                      project_id: acme/alice
+                      user_spent: 3.141592
+                      input_spent: 1.400000
+                      output_spent: 1.741592
+                      request_count: 112
+
+                org_admin_view:
+                  summary: ORG_ADMIN — all org groups + paginated users
+                  value:
+                    period: "2026-06"
+                    groups:
+                      - org: acme
+                        group_spent: 42.318450
+                        input_spent: 19.100000
+                        output_spent: 23.218450
+                        request_count: 1500
+                    users:
+                      - project_id: acme/alice
+                        user_spent: 8.750000
+                        input_spent: 4.000000
+                        output_spent: 4.750000
+                        request_count: 350
+                      - project_id: acme/bob
+                        user_spent: 3.141592
+                        input_spent: 1.400000
+                        output_spent: 1.741592
+                        request_count: 112
+                    has_more: false
+                    current_user:
+                      project_id: acme/admin
+                      user_spent: 0.500000
+                      input_spent: 0.200000
+                      output_spent: 0.300000
+                      request_count: 18
+
+                super_admin_view:
+                  summary: SUPER_ADMIN — all orgs, paginated users
+                  value:
+                    period: "2026-06"
+                    groups:
+                      - org: acme
+                        group_spent: 42.318450
+                        input_spent: 19.100000
+                        output_spent: 23.218450
+                        request_count: 1500
+                      - org: globex
+                        group_spent: 95.000000
+                        input_spent: 40.000000
+                        output_spent: 55.000000
+                        request_count: 3800
+                    users:
+                      - project_id: globex/charlie
+                        user_spent: 9.990000
+                        input_spent: 4.500000
+                        output_spent: 5.490000
+                        request_count: 400
+                      - project_id: acme/alice
+                        user_spent: 8.750000
+                        input_spent: 4.000000
+                        output_spent: 4.750000
+                        request_count: 350
+                    has_more: true
+                    current_user: null
+
+                paginated_next:
+                  summary: Second page of users (user_offset=500)
+                  value:
+                    period: "2026-06"
+                    groups:
+                      - org: acme
+                        group_spent: 42.318450
+                        input_spent: 19.100000
+                        output_spent: 23.218450
+                        request_count: 1500
+                    users:
+                      - project_id: acme/carol
+                        user_spent: 0.820000
+                        input_spent: 0.400000
+                        output_spent: 0.420000
+                        request_count: 29
+                    has_more: false
+                    current_user:
+                      project_id: acme/admin
+                      user_spent: 0.500000
+                      input_spent: 0.200000
+                      output_spent: 0.300000
+                      request_count: 18
+
+                custom_range:
+                  summary: Custom date range (start/end params)
+                  value:
+                    period: "2026-06-01T00:00:00Z/2026-06-15T23:59:59Z"
+                    groups:
+                      - org: acme
+                        group_spent: 18.440000
+                        input_spent: 8.200000
+                        output_spent: 10.240000
+                        request_count: 680
+                    users: []
+                    has_more: false
+                    current_user: null
+
+                no_spend:
+                  summary: No activity in the requested period
+                  value:
+                    period: "2026-05"
+                    groups: []
+                    users: []
+                    has_more: false
+                    current_user: null
+
+        "400":
+          description: Invalid period parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDetail"
+              examples:
+                conflicting_params:
+                  summary: period and start/end both provided
+                  value:
+                    detail: "Provide either 'period' or 'start'/'end', not both."
+                missing_end:
+                  summary: start without end
+                  value:
+                    detail: "Both 'start' and 'end' are required for a custom range."
+                end_before_start:
+                  summary: end is not after start
+                  value:
+                    detail: "'end' must be after 'start'."
+                bad_format:
+                  summary: unparseable datetime
+                  value:
+                    detail: "Invalid datetime format. Use ISO 8601 (e.g. 2026-06-01T00:00:00)."
+        "401":
+          description: Missing or invalid authentication
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDetail"
+              example:
+                detail: "Missing authentication"
+        "503":
+          description: ClickHouse not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDetail"
+              example:
+                detail: "ClickHouse not configured"
+
+  /api/public/billing/who:
+    get:
+      summary: Caller identity
+      description: |
+        Returns the resolved identity of the caller — used by the billing
+        dashboard page to display the role badge and org label.
+      tags: [llogr]
+      parameters:
+        - name: X-Group-ID
+          in: header
+          required: false
+          schema:
+            type: string
+          example: acme/alice
+        - name: X-Role
+          in: header
+          required: false
+          schema:
+            type: string
+            enum: [USER, ORG_ADMIN, SUPER_ADMIN]
+            default: USER
+        - name: Authorization
+          in: header
+          required: false
+          description: HTTP Basic auth fallback when `X-Group-ID` is absent.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Caller identity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CallerIdentity"
+              example:
+                role: ORG_ADMIN
+                project_id: acme/alice
+                org: acme
+        "401":
+          description: Missing or invalid authentication
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDetail"
+
+  /billing:
+    get:
+      summary: Billing dashboard (HTML)
+      description: |
+        Serves the standalone billing dashboard page. Renders server-side with
+        the llogr `root_path` injected so JS API calls resolve correctly behind
+        the nginx proxy.
+
+        The page fetches `/api/public/billing/who` for identity and
+        `/api/public/billing/summary` for spend data.
+      tags: [llogr]
+      responses:
+        "200":
+          description: HTML page
+          content:
+            text/html:
+              schema:
+                type: string
+
+components:
+  schemas:
+
+    # ── llogr schemas ──────────────────────────────────────────────────────────
+
+    LlogrBillingSummary:
+      type: object
+      required: [period, groups, users, has_more]
+      properties:
+        period:
+          type: string
+          description: |
+            Reflects which period params were used:
+            - `YYYY-MM` when `period` param was given or defaulted
+            - `YYYY-MM-DDThh:mm:ssZ/YYYY-MM-DDThh:mm:ssZ` for a custom range
+          examples:
+            - "2026-06"
+            - "2026-06-01T00:00:00Z/2026-06-15T23:59:59Z"
+        groups:
+          type: array
+          description: |
+            Per-org spend totals. Always returned in full regardless of pagination.
+            Sorted by `group_spent` descending.
+            Scope depends on role — see endpoint description.
+          items:
+            $ref: "#/components/schemas/LlogrGroupSpend"
+        users:
+          type: array
+          description: |
+            Per-user (`project_id`) spend breakdown. Populated only for
+            `ORG_ADMIN` and `SUPER_ADMIN`. One page of `user_limit` entries,
+            sorted by `user_spent` descending. Empty for `USER` role.
+          items:
+            $ref: "#/components/schemas/LlogrUserSpend"
+        has_more:
+          type: boolean
+          description: |
+            `true` when more users exist beyond the current page.
+            Increment `user_offset` by `user_limit` and repeat the request.
+            Always `false` for `USER` role (users list is always empty).
+          example: false
+        current_user:
+          description: |
+            Caller's own spend for the period. Present when `X-Group-ID`
+            contains a slash (i.e. `org/user` format). `null` otherwise.
+          oneOf:
+            - $ref: "#/components/schemas/LlogrUserSpend"
+            - type: "null"
+
+    LlogrGroupSpend:
+      type: object
+      required: [org, group_spent, input_spent, output_spent, request_count]
+      properties:
+        org:
+          type: string
+          description: Organisation identifier (first `/`-delimited segment of `project_id`).
+          example: acme
+        group_spent:
+          type: number
+          format: float
+          description: Total spend for the org in the period (USD), rounded to 6 decimal places.
+          example: 42.318450
+        input_spent:
+          type: number
+          format: float
+          description: Portion attributable to input (prompt) tokens (USD).
+          example: 19.100000
+        output_spent:
+          type: number
+          format: float
+          description: Portion attributable to output (completion) tokens (USD).
+          example: 23.218450
+        request_count:
+          type: integer
+          format: int64
+          description: Number of billable events (`cost > 0`) in the period.
+          example: 1500
+
+    LlogrUserSpend:
+      type: object
+      required: [project_id, user_spent, input_spent, output_spent, request_count]
+      properties:
+        project_id:
+          type: string
+          description: Full `org/user` identity (matches `X-Group-ID`).
+          example: acme/alice
+        user_spent:
+          type: number
+          format: float
+          description: User's total spend in the period (USD), rounded to 6 decimal places.
+          example: 3.141592
+        input_spent:
+          type: number
+          format: float
+          description: Input token cost share (USD).
+          example: 1.400000
+        output_spent:
+          type: number
+          format: float
+          description: Output token cost share (USD).
+          example: 1.741592
+        request_count:
+          type: integer
+          format: int64
+          description: Number of billable events for this user in the period.
+          example: 112
+
+    CallerIdentity:
+      type: object
+      required: [role, project_id, org]
+      properties:
+        role:
+          type: string
+          enum: [USER, ORG_ADMIN, SUPER_ADMIN]
+          example: ORG_ADMIN
+        project_id:
+          type: string
+          description: Full `org/user` identity (matches `X-Group-ID`).
+          example: acme/alice
+        org:
+          type: string
+          description: First `/`-delimited segment of `project_id`.
+          example: acme
+
+    ErrorDetail:
+      type: object
+      required: [detail]
+      properties:
+        detail:
+          type: string
+          example: "ClickHouse not configured"

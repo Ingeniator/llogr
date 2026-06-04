@@ -510,6 +510,152 @@ async def export_generations_ch(
         logger.error("clickhouse_export_failed", error=str(e))
 
 
+async def get_billing_summary_ch(
+    project_id: str,
+    settings: Settings,
+    is_org_admin: bool = False,
+    is_super_admin: bool = False,
+    period_start: datetime | None = None,
+    period_end: datetime | None = None,
+    user_limit: int = 500,
+    user_offset: int = 0,
+) -> dict:
+    """Aggregate spend from ClickHouse for a billing period.
+
+    Scope rules mirror yallmp's billing service:
+      SUPER_ADMIN  – all orgs, all users
+      ORG_ADMIN    – own org groups + per-user breakdown
+      USER         – own org group total only, own user spend
+    """
+    cfg = settings.clickhouse
+    if not cfg.url:
+        return {"groups": [], "users": [], "current_user": None}
+
+    start_str = period_start.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+    end_str = period_end.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+
+    org = project_id.split("/")[0] if project_id else ""
+
+    # Base conditions shared by all queries
+    base_conditions = [
+        "cost > 0",
+        "timestamp >= {start:String}",
+        "timestamp < {end:String}",
+    ]
+    base_params: dict[str, str] = {"start": start_str, "end": end_str}
+
+    # Org-scope condition (not applied for SUPER_ADMIN)
+    if is_super_admin:
+        scope_condition = ""
+        scope_params: dict[str, str] = {}
+    else:
+        scope_condition = "(project_id LIKE {org_prefix:String} OR project_id = {org_exact:String})"
+        scope_params = {"org_prefix": f"{org}/%", "org_exact": org}
+
+    all_params = {**base_params, **scope_params}
+    where_parts = base_conditions + ([scope_condition] if scope_condition else [])
+    where = " AND ".join(where_parts)
+    ch_query_params = {**_ch_params(cfg), **{f"param_{k}": v for k, v in all_params.items()}}
+
+    # ── Groups query (per-org aggregation) ───────────────────────────────────
+    groups_sql = f"""
+        SELECT
+            splitByChar('/', project_id)[1]  AS org,
+            round(SUM(cost), 6)              AS group_spent,
+            round(SUM(input_cost), 6)        AS input_spent,
+            round(SUM(output_cost), 6)       AS output_spent,
+            toUInt64(COUNT())                AS request_count
+        FROM {cfg.database}.{cfg.table}
+        WHERE {where}
+        GROUP BY org
+        ORDER BY group_spent DESC
+        FORMAT JSON
+    """
+
+    # ── Users query (per-project_id, admins only) ────────────────────────────
+    # Fetch one extra row to detect whether another page exists.
+    users_sql = None
+    if is_org_admin or is_super_admin:
+        users_sql = f"""
+            SELECT
+                project_id,
+                round(SUM(cost), 6)              AS user_spent,
+                round(SUM(input_cost), 6)        AS input_spent,
+                round(SUM(output_cost), 6)       AS output_spent,
+                toUInt64(COUNT())                AS request_count
+            FROM {cfg.database}.{cfg.table}
+            WHERE {where}
+            GROUP BY project_id
+            ORDER BY user_spent DESC
+            LIMIT {user_limit + 1} OFFSET {user_offset}
+            FORMAT JSON
+        """
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(_ch_url(cfg), params={**ch_query_params, "query": groups_sql})
+            resp.raise_for_status()
+            groups = resp.json().get("data", [])
+
+            users: list[dict] = []
+            has_more = False
+            if users_sql:
+                resp = await client.post(_ch_url(cfg), params={**ch_query_params, "query": users_sql})
+                resp.raise_for_status()
+                raw_users = resp.json().get("data", [])
+                has_more = len(raw_users) > user_limit
+                users = raw_users[:user_limit]
+
+        # ── Current user's own spend ──────────────────────────────────────────
+        current_user = None
+        if "/" in (project_id or ""):
+            # Reuse users query result for admins; run targeted query for regular users
+            for u in users:
+                if u.get("project_id") == project_id:
+                    current_user = u
+                    break
+
+            if current_user is None:
+                cu_conditions = [
+                    "cost > 0",
+                    "timestamp >= {start:String}",
+                    "timestamp < {end:String}",
+                    "project_id = {project_id:String}",
+                ]
+                cu_sql = f"""
+                    SELECT
+                        project_id,
+                        round(SUM(cost), 6)              AS user_spent,
+                        round(SUM(input_cost), 6)        AS input_spent,
+                        round(SUM(output_cost), 6)       AS output_spent,
+                        toUInt64(COUNT())                AS request_count
+                    FROM {cfg.database}.{cfg.table}
+                    WHERE {" AND ".join(cu_conditions)}
+                    GROUP BY project_id
+                    FORMAT JSON
+                """
+                async with httpx.AsyncClient(timeout=30) as client:
+                    resp = await client.post(
+                        _ch_url(cfg),
+                        params={
+                            **_ch_params(cfg),
+                            "query": cu_sql,
+                            "param_start": start_str,
+                            "param_end": end_str,
+                            "param_project_id": project_id,
+                        },
+                    )
+                    resp.raise_for_status()
+                    cu_rows = resp.json().get("data", [])
+                    current_user = cu_rows[0] if cu_rows else None
+
+        return {"groups": groups, "users": users, "has_more": has_more, "current_user": current_user}
+
+    except Exception as exc:
+        logger.error("clickhouse_billing_summary_failed", error=str(exc))
+        return {"groups": [], "users": [], "has_more": False, "current_user": None}
+
+
 async def list_sessions_ch(
     project_id: str,
     settings: Settings,
