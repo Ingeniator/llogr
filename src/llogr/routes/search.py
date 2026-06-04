@@ -40,6 +40,7 @@ async def search(
 
     backend = settings.features.search_backend
     is_whitelisted_agent = bool(auth.is_super_admin and trace_type and trace_type in settings.features.agent_whitelist)
+    is_super_admin_access = auth.is_super_admin and settings.features.superadmin_access
 
     if backend == "clickhouse":
         from llogr.clickhouse import search_logs_ch
@@ -49,6 +50,7 @@ async def search(
             project_id=auth.public_key,
             is_org_admin=auth.is_org_admin,
             is_whitelisted_agent=is_whitelisted_agent,
+            is_super_admin=is_super_admin_access,
             settings=settings,
             start=start, end=end,
             session_id=session_id, trace_id=trace_id,
@@ -63,6 +65,7 @@ async def search(
         session_id=session_id, trace_id=trace_id,
         trace_type=trace_type, input_hash=input_hash,
         cross_org=is_whitelisted_agent,
+        superadmin_access=is_super_admin_access,
     )
     keys = [f["key"] for f in keys_meta]
 

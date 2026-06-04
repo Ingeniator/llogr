@@ -117,6 +117,9 @@ class FeaturesConfig:
     langfuse_ui_url: str = ""
     # Agent names whose traces a super-admin can query across all users
     agent_whitelist: tuple[str, ...] = ()
+    # When true, SUPER_ADMIN role can read logs across all tenants.
+    # Enable via env: LLOGR_SUPERADMIN_ACCESS=true  or  features.superadmin_access: true in config.yaml
+    superadmin_access: bool = False
 
 
 @dataclass(frozen=True)
@@ -154,9 +157,13 @@ def load_config(path: str | Path) -> Settings:
         clickstream=ClickstreamConfig(**raw.get("clickstream", {})),
         server=ServerConfig(**raw.get("server", {})),
         features=FeaturesConfig(**{
-            **{k: v for k, v in raw.get("features", {}).items() if k not in ("store_backends", "forward")},
+            **{k: v for k, v in raw.get("features", {}).items() if k not in ("store_backends", "forward", "superadmin_access")},
             "store_backends": tuple(raw.get("features", {}).get("store_backends", ("s3",))),
             "agent_whitelist": tuple(raw.get("features", {}).get("agent_whitelist", ())),
+            "superadmin_access": (
+                os.getenv("LLOGR_SUPERADMIN_ACCESS", "").lower() in ("1", "true", "yes")
+                or bool(raw.get("features", {}).get("superadmin_access", False))
+            ),
             "forward": tuple(
                 ForwardTargetConfig(
                     url=t["url"],

@@ -39,6 +39,7 @@ async def list_sessions(
         start=start,
         end=end,
         is_org_admin=auth.is_org_admin,
+        is_super_admin=auth.is_super_admin and settings.features.superadmin_access,
         limit=limit,
         offset=offset,
     )
@@ -59,5 +60,6 @@ async def get_session_traces(
         settings=settings,
         session_id=session_id,
         is_org_admin=auth.is_org_admin,
+        is_super_admin=auth.is_super_admin and settings.features.superadmin_access,
     )
     return {"session_id": session_id, "traces": traces}

@@ -27,10 +27,11 @@ async def get_logs(
         start = start.replace(tzinfo=timezone.utc)
     if end.tzinfo is None:
         end = end.replace(tzinfo=timezone.utc)
+    superadmin_access = auth.is_super_admin and settings.features.superadmin_access
     files = await list_batch_urls(
         auth, settings, start, end,
         session_id=session_id, trace_id=trace_id, input_hash=input_hash,
-        trace_type=trace_type,
+        trace_type=trace_type, superadmin_access=superadmin_access,
     )
     return {"files": files}
 
@@ -50,10 +51,11 @@ async def list_logs(
         start = start.replace(tzinfo=timezone.utc)
     if end and end.tzinfo is None:
         end = end.replace(tzinfo=timezone.utc)
+    superadmin_access = auth.is_super_admin and settings.features.superadmin_access
     files = await list_batch_keys(
         auth, settings, start=start, end=end,
         session_id=session_id, trace_id=trace_id, input_hash=input_hash,
-        trace_type=trace_type,
+        trace_type=trace_type, superadmin_access=superadmin_access,
     )
     return {"files": files}
 
@@ -68,5 +70,6 @@ async def get_urls(
     auth: AuthContext = Depends(get_auth),
     settings: Settings = Depends(get_settings),
 ) -> dict:
-    files = await generate_presigned_urls(body.keys, auth, settings)
+    superadmin_access = auth.is_super_admin and settings.features.superadmin_access
+    files = await generate_presigned_urls(body.keys, auth, settings, superadmin_access=superadmin_access)
     return {"files": files}

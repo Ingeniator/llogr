@@ -365,6 +365,7 @@ async def search_logs_ch(
     settings: Settings,
     is_org_admin: bool = False,
     is_whitelisted_agent: bool = False,
+    is_super_admin: bool = False,
     start: datetime | None = None,
     end: datetime | None = None,
     session_id: str | None = None,
@@ -378,7 +379,7 @@ async def search_logs_ch(
     if not cfg.url:
         return []
 
-    if is_whitelisted_agent:
+    if is_super_admin or is_whitelisted_agent:
         conditions: list[str] = []
         params: dict[str, str] = {}
     elif is_org_admin and "/" in project_id:
@@ -462,6 +463,7 @@ async def export_generations_ch(
     start: datetime,
     end: datetime,
     is_org_admin: bool = False,
+    is_super_admin: bool = False,
     session_id: str | None = None,
 ):
     """Async generator: stream generation-create events as JSON lines."""
@@ -469,7 +471,10 @@ async def export_generations_ch(
     if not cfg.url:
         return
 
-    if is_org_admin and "/" in project_id:
+    if is_super_admin:
+        conditions: list[str] = []
+        params: dict[str, str] = {}
+    elif is_org_admin and "/" in project_id:
         org = project_id.split("/", 1)[0]
         conditions = ["project_id LIKE {project_id:String}"]
         params = {"project_id": f"{org}/%"}
@@ -662,6 +667,7 @@ async def list_sessions_ch(
     start: datetime,
     end: datetime,
     is_org_admin: bool = False,
+    is_super_admin: bool = False,
     limit: int = 50,
     offset: int = 0,
 ) -> dict:
@@ -670,10 +676,13 @@ async def list_sessions_ch(
     if not cfg.url:
         return {"sessions": []}
 
-    if is_org_admin and "/" in project_id:
+    if is_super_admin:
+        conditions: list[str] = []
+        params: dict[str, str] = {}
+    elif is_org_admin and "/" in project_id:
         org = project_id.split("/", 1)[0]
         conditions = ["project_id LIKE {project_id:String}"]
-        params: dict[str, str] = {"project_id": f"{org}/%"}
+        params = {"project_id": f"{org}/%"}
     else:
         conditions = ["project_id = {project_id:String}"]
         params = {"project_id": project_id}
@@ -723,16 +732,20 @@ async def get_session_traces_ch(
     settings: Settings,
     session_id: str,
     is_org_admin: bool = False,
+    is_super_admin: bool = False,
 ) -> list[dict]:
     """Return all generation events for a single session."""
     cfg = settings.clickhouse
     if not cfg.url:
         return []
 
-    if is_org_admin and "/" in project_id:
+    if is_super_admin:
+        conditions: list[str] = []
+        params: dict[str, str] = {}
+    elif is_org_admin and "/" in project_id:
         org = project_id.split("/", 1)[0]
         conditions = ["project_id LIKE {project_id:String}"]
-        params: dict[str, str] = {"project_id": f"{org}/%"}
+        params = {"project_id": f"{org}/%"}
     else:
         conditions = ["project_id = {project_id:String}"]
         params = {"project_id": project_id}

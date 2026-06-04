@@ -216,13 +216,13 @@ def parse_key_meta(key: str) -> KeyMeta | None:
         return None
 
 
-def _list_prefix(auth: AuthContext, s3_cfg, cross_org: bool = False) -> str:
+def _list_prefix(auth: AuthContext, s3_cfg, cross_org: bool = False, superadmin_access: bool = False) -> str:
     """Build S3 prefix for listing.
 
-    SUPER_ADMIN or cross_org (whitelisted-agent query) sees all logs;
+    cross_org (whitelisted-agent query) or SUPER_ADMIN with superadmin_access sees all logs;
     others are scoped to their group.
     """
-    if auth.is_super_admin or cross_org:
+    if cross_org or (auth.is_super_admin and superadmin_access):
         prefix = ""
     elif "/" in auth.public_key:
         group = auth.public_key.split("/", 1)[0]
@@ -297,10 +297,11 @@ async def list_batch_keys(
     input_hash: str | None = None,
     trace_type: str | None = None,
     cross_org: bool = False,
+    superadmin_access: bool = False,
 ) -> list[dict]:
     """List batch keys (metadata only, no presigned URLs)."""
     s3_cfg = settings.s3
-    prefix = _list_prefix(auth, s3_cfg, cross_org=cross_org)
+    prefix = _list_prefix(auth, s3_cfg, cross_org=cross_org, superadmin_access=superadmin_access)
 
     session = aioboto3.Session(
         aws_access_key_id=s3_cfg.access_key_id,
@@ -343,10 +344,11 @@ async def generate_presigned_urls(
     keys: list[str],
     auth: AuthContext,
     settings: Settings,
+    superadmin_access: bool = False,
 ) -> list[dict]:
     """Generate presigned URLs for given keys, validating ownership."""
     s3_cfg = settings.s3
-    prefix = _list_prefix(auth, s3_cfg)
+    prefix = _list_prefix(auth, s3_cfg, superadmin_access=superadmin_access)
     results: list[dict] = []
 
     session = aioboto3.Session(
@@ -378,9 +380,10 @@ async def list_batch_urls(
     trace_id: str | None = None,
     input_hash: str | None = None,
     trace_type: str | None = None,
+    superadmin_access: bool = False,
 ) -> list[dict]:
     s3_cfg = settings.s3
-    prefix = _list_prefix(auth, s3_cfg)
+    prefix = _list_prefix(auth, s3_cfg, superadmin_access=superadmin_access)
 
     session = aioboto3.Session(
         aws_access_key_id=s3_cfg.access_key_id,
