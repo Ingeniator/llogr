@@ -23,6 +23,12 @@ async def ingest(
     stored_to = []
     failed = []
 
+    # Stamp fallback session_id onto events that don't carry one
+    if session_id:
+        for event in batch:
+            if not event.body.get("sessionId"):
+                event.body["sessionId"] = session_id
+
     # Pre-compute shared metadata once
     from llogr.s3 import extract_input_hash
     input_hash = extract_input_hash(batch)

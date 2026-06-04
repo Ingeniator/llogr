@@ -124,6 +124,7 @@ class ServerConfig:
     port: int = 5000
     workers: int = 1
     timeout_keep_alive: int = 65
+    timeout_worker_healthcheck: int = 30
     debug: bool = False
     silence_probes: bool = True
     hide_auth_inputs: bool = False
