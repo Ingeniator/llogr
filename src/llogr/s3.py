@@ -298,6 +298,7 @@ async def list_batch_keys(
     trace_type: str | None = None,
     cross_org: bool = False,
     superadmin_access: bool = False,
+    limit: int | None = None,
 ) -> list[dict]:
     """List batch keys (metadata only, no presigned URLs)."""
     s3_cfg = settings.s3
@@ -309,9 +310,14 @@ async def list_batch_keys(
         region_name=s3_cfg.region,
     )
     results: list[dict] = []
+    page_size = min(limit * 3, 1000) if limit else 1000
     async with session.client("s3", endpoint_url=s3_cfg.endpoint, config=_s3_client_config(s3_cfg)) as client:
         paginator = client.get_paginator("list_objects_v2")
-        async for page in paginator.paginate(Bucket=s3_cfg.bucket, Prefix=prefix):
+        async for page in paginator.paginate(
+            Bucket=s3_cfg.bucket,
+            Prefix=prefix,
+            PaginationConfig={"PageSize": page_size},
+        ):
             for obj in page.get("Contents", []):
                 key = obj["Key"]
                 meta = parse_key_meta(key)
@@ -337,6 +343,8 @@ async def list_batch_keys(
                     "input_hash": meta.input_hash,
                     "timestamp": meta.timestamp.isoformat(),
                 })
+                if limit and len(results) >= limit:
+                    return results
     return results
 
 
@@ -381,6 +389,7 @@ async def list_batch_urls(
     input_hash: str | None = None,
     trace_type: str | None = None,
     superadmin_access: bool = False,
+    limit: int | None = None,
 ) -> list[dict]:
     s3_cfg = settings.s3
     prefix = _list_prefix(auth, s3_cfg, superadmin_access=superadmin_access)
@@ -391,9 +400,14 @@ async def list_batch_urls(
         region_name=s3_cfg.region,
     )
     results: list[dict] = []
+    page_size = min(limit * 3, 1000) if limit else 1000
     async with session.client("s3", endpoint_url=s3_cfg.endpoint, config=_s3_client_config(s3_cfg)) as client:
         paginator = client.get_paginator("list_objects_v2")
-        async for page in paginator.paginate(Bucket=s3_cfg.bucket, Prefix=prefix):
+        async for page in paginator.paginate(
+            Bucket=s3_cfg.bucket,
+            Prefix=prefix,
+            PaginationConfig={"PageSize": page_size},
+        ):
             for obj in page.get("Contents", []):
                 key = obj["Key"]
                 meta = parse_key_meta(key)
@@ -423,4 +437,6 @@ async def list_batch_urls(
                     "timestamp": meta.timestamp.isoformat(),
                     "url": url,
                 })
+                if limit and len(results) >= limit:
+                    return results
     return results

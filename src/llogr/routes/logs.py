@@ -20,6 +20,7 @@ async def get_logs(
     trace_id: str | None = Query(default=None),
     input_hash: str | None = Query(default=None),
     trace_type: str | None = Query(default=None),
+    limit: int | None = Query(default=None, ge=1, le=10000),
     auth: AuthContext = Depends(get_auth),
     settings: Settings = Depends(get_settings),
 ) -> dict:
@@ -32,6 +33,7 @@ async def get_logs(
         auth, settings, start, end,
         session_id=session_id, trace_id=trace_id, input_hash=input_hash,
         trace_type=trace_type, superadmin_access=superadmin_access,
+        limit=limit,
     )
     return {"files": files}
 
@@ -44,6 +46,7 @@ async def list_logs(
     trace_id: str | None = Query(default=None),
     input_hash: str | None = Query(default=None),
     trace_type: str | None = Query(default=None),
+    limit: int | None = Query(default=None, ge=1, le=10000),
     auth: AuthContext = Depends(get_auth),
     settings: Settings = Depends(get_settings),
 ) -> dict:
@@ -56,6 +59,7 @@ async def list_logs(
         auth, settings, start=start, end=end,
         session_id=session_id, trace_id=trace_id, input_hash=input_hash,
         trace_type=trace_type, superadmin_access=superadmin_access,
+        limit=limit,
     )
     return {"files": files}
 
