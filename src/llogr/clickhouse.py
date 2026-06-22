@@ -482,7 +482,10 @@ async def export_generations_ch(
         conditions = ["project_id = {project_id:String}"]
         params = {"project_id": project_id}
 
-    conditions.append("event_type = 'generation-create'")
+    # Include generation-update so that cross-batch streaming traces are exported.
+    # When create+update arrive in the same batch they are already merged at ingestion
+    # time; this catches the rare case where the update was flushed in a later batch.
+    conditions.append("event_type IN ('generation-create', 'generation-update')")
     conditions.append("timestamp >= {start:String}")
     params["start"] = start.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
     conditions.append("timestamp <= {end:String}")
@@ -688,7 +691,7 @@ async def list_sessions_ch(
         params = {"project_id": project_id}
 
     conditions += [
-        "event_type IN ('generation-create', 'span-create')",
+        "event_type IN ('generation-create', 'generation-update', 'span-create', 'span-update')",
         "session_id != ''",
         "timestamp >= {start:String}",
         "timestamp <= {end:String}",
@@ -751,7 +754,7 @@ async def get_session_traces_ch(
         params = {"project_id": project_id}
 
     conditions += [
-        "event_type IN ('generation-create', 'span-create')",
+        "event_type IN ('generation-create', 'generation-update', 'span-create', 'span-update')",
         "session_id = {session_id:String}",
     ]
     params["session_id"] = session_id

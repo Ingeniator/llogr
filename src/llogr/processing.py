@@ -10,6 +10,67 @@ from llogr.models import IngestionEvent
 
 logger = structlog.get_logger(__name__)
 
+# event types where updates should be merged back into the corresponding create
+_MERGE_PAIRS: dict[str, str] = {
+    "generation-update": "generation-create",
+    "span-update": "span-create",
+}
+
+
+def _merge_update_events(batch: list[IngestionEvent]) -> list[IngestionEvent]:
+    """Merge *-update events into corresponding *-create events in the same batch.
+
+    Langfuse SDK streaming pattern sends a generation-create (input only, no
+    output) followed by a generation-update (full output + usage) in the same
+    flush batch.  Without merging, the create row stored in ClickHouse has no
+    output, and queries that filter on event_type='generation-create' miss the
+    actual LLM response.
+
+    Merging is keyed on body["id"] (the Langfuse observation/span ID, which is
+    the same in both the create and the update event).  Fields from the update
+    overwrite those in the create; the "id" key itself is never overwritten.
+    Update events that have no matching create in this batch are kept as-is.
+    """
+    creates: dict[str, IngestionEvent] = {}  # body.id → create event
+    update_groups: dict[str, list[IngestionEvent]] = {}  # body.id → [updates]
+    other: list[IngestionEvent] = []
+
+    for event in batch:
+        body_id: str = event.body.get("id", "")
+        target_type = _MERGE_PAIRS.get(event.type)
+        if target_type is not None:
+            # This is an *-update event
+            if body_id:
+                update_groups.setdefault(body_id, []).append(event)
+            else:
+                other.append(event)
+        elif event.type in _MERGE_PAIRS.values():
+            # This is a *-create event
+            if body_id:
+                creates[body_id] = event
+            else:
+                other.append(event)
+        else:
+            other.append(event)
+
+    standalone_updates: list[IngestionEvent] = []
+    for body_id, updates in update_groups.items():
+        if body_id in creates:
+            create_ev = creates[body_id]
+            for update_ev in updates:
+                for key, value in update_ev.body.items():
+                    if key != "id" and value is not None:
+                        create_ev.body[key] = value
+            logger.debug(
+                "merged_generation_update",
+                body_id=body_id,
+                updates=len(updates),
+            )
+        else:
+            standalone_updates.extend(updates)
+
+    return list(creates.values()) + standalone_updates + other
+
 
 async def ingest(
     batch: list[IngestionEvent],
@@ -23,6 +84,11 @@ async def ingest(
     backends = settings.features.store_backends
     stored_to = []
     failed = []
+
+    # Merge generation-update / span-update into their create counterparts so
+    # that streaming traces (which arrive as separate create + update events)
+    # are stored as a single complete row in every backend.
+    batch = _merge_update_events(batch)
 
     # Stamp fallback session_id onto events that don't carry one
     if session_id:
