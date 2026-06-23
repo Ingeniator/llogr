@@ -96,12 +96,10 @@ async def ingest(
             if not event.body.get("sessionId"):
                 event.body["sessionId"] = session_id
 
-    # Stamp agent_name onto events that have no name (or OTEL's "unknown" fallback)
+    # Stamp agent_name onto all events, overriding model name or OTEL fallbacks
     if agent_name:
         for event in batch:
-            name = event.body.get("name")
-            if not name or name == "unknown":
-                event.body["name"] = agent_name
+            event.body["name"] = agent_name
 
     # Pre-compute shared metadata once
     from llogr.s3 import extract_input_hash
