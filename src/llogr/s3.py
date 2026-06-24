@@ -270,6 +270,12 @@ async def save_batch_to_s3(
         aws_secret_access_key=s3_cfg.secret_access_key,
         region_name=s3_cfg.region,
     )
+    pointer_key: str | None = None
+    if session_id != "none":
+        pointer_key = f"{auth.public_key}/.sessions/{session_id}/{uuid.uuid4().hex}"
+        if s3_cfg.key_prefix:
+            pointer_key = f"{s3_cfg.key_prefix.strip('/')}/{pointer_key}"
+
     with S3_SAVE_SECONDS.time():
         try:
             async with session.client("s3", endpoint_url=s3_cfg.endpoint, config=_s3_client_config(s3_cfg)) as client:
@@ -279,6 +285,13 @@ async def save_batch_to_s3(
                     Body=body.encode(),
                     ContentType="application/x-ndjson",
                 )
+                if pointer_key:
+                    await client.put_object(
+                        Bucket=s3_cfg.bucket,
+                        Key=pointer_key,
+                        Body=key.encode(),
+                        ContentType="text/plain",
+                    )
         except Exception:
             S3_SAVE_ERRORS.inc()
             raise
@@ -376,6 +389,76 @@ async def generate_presigned_urls(
             if s3_cfg.public_endpoint and s3_cfg.endpoint:
                 url = url.replace(s3_cfg.endpoint, s3_cfg.public_endpoint, 1)
             results.append({"key": key, "url": url})
+    return results
+
+
+_TRACE_EVENT_TYPES = {
+    "generation-create", "generation-update",
+    "span-create", "span-update",
+}
+
+
+async def get_session_traces_s3(
+    session_id: str,
+    auth: AuthContext,
+    settings: Settings,
+) -> list[dict]:
+    """Return all generation/span events for a single session via pointer index."""
+    s3_cfg = settings.s3
+
+    pointer_prefix = f"{auth.public_key}/.sessions/{session_id}/"
+    if s3_cfg.key_prefix:
+        pointer_prefix = f"{s3_cfg.key_prefix.strip('/')}/{pointer_prefix}"
+
+    boto_session = aioboto3.Session(
+        aws_access_key_id=s3_cfg.access_key_id,
+        aws_secret_access_key=s3_cfg.secret_access_key,
+        region_name=s3_cfg.region,
+    )
+    results: list[dict] = []
+    async with boto_session.client("s3", endpoint_url=s3_cfg.endpoint, config=_s3_client_config(s3_cfg)) as client:
+        paginator = client.get_paginator("list_objects_v2")
+        pointer_keys: list[str] = []
+        async for page in paginator.paginate(Bucket=s3_cfg.bucket, Prefix=pointer_prefix):
+            for obj in page.get("Contents", []):
+                pointer_keys.append(obj["Key"])
+
+        main_keys: list[str] = []
+        for pk in pointer_keys:
+            try:
+                resp = await client.get_object(Bucket=s3_cfg.bucket, Key=pk)
+                main_keys.append((await resp["Body"].read()).decode().strip())
+            except Exception as exc:
+                logger.warning("s3_session_pointer_read_failed", key=pk, error=str(exc))
+
+        for key in main_keys:
+            try:
+                resp = await client.get_object(Bucket=s3_cfg.bucket, Key=key)
+                raw = await resp["Body"].read()
+            except Exception as exc:
+                logger.warning("s3_session_traces_fetch_failed", key=key, error=str(exc))
+                continue
+            for line in raw.decode().splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if event.get("type") not in _TRACE_EVENT_TYPES:
+                    continue
+                results.append({
+                    "event_id": event.get("id", ""),
+                    "timestamp": event.get("timestamp", ""),
+                    "project_id": event.get("project_id", ""),
+                    "model": event.get("model", ""),
+                    "session_id": event.get("session_id", ""),
+                    "trace_id": event.get("trace_id", ""),
+                    "body": event.get("body", {}),
+                })
+
+    results.sort(key=lambda r: r["timestamp"])
     return results
 
 

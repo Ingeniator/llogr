@@ -51,15 +51,24 @@ async def get_session_traces(
     auth: AuthContext = Depends(get_auth),
     settings: Settings = Depends(get_settings),
 ):
-    if not settings.clickhouse.url:
-        raise HTTPException(status_code=503, detail="ClickHouse not configured")
+    if settings.clickhouse.url:
+        from llogr.clickhouse import get_session_traces_ch
+        traces = await get_session_traces_ch(
+            project_id=auth.public_key,
+            settings=settings,
+            session_id=session_id,
+            is_org_admin=auth.is_org_admin,
+            is_super_admin=auth.is_super_admin and settings.features.superadmin_access,
+        )
+        return {"session_id": session_id, "traces": traces}
 
-    from llogr.clickhouse import get_session_traces_ch
-    traces = await get_session_traces_ch(
-        project_id=auth.public_key,
-        settings=settings,
-        session_id=session_id,
-        is_org_admin=auth.is_org_admin,
-        is_super_admin=auth.is_super_admin and settings.features.superadmin_access,
-    )
-    return {"session_id": session_id, "traces": traces}
+    if settings.s3.bucket:
+        from llogr.s3 import get_session_traces_s3
+        traces = await get_session_traces_s3(
+            session_id=session_id,
+            auth=auth,
+            settings=settings,
+        )
+        return {"session_id": session_id, "traces": traces}
+
+    raise HTTPException(status_code=503, detail="No trace backend configured")
