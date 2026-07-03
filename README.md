@@ -9,7 +9,7 @@ A lightweight FastAPI service that acts as a drop-in replacement for Langfuse's 
 ```bash
 uv sync
 make dev
-```wede3fferc
+```
 
 The server starts at `http://localhost:8000`.
 
@@ -34,6 +34,24 @@ langfuse = Langfuse(
 )
 ```
 
+## Configuration
+
+### Clickstream fan-out
+
+`clickstream` in `config.yaml` forwards every ingested batch to one or more Amplitude-compatible endpoints (`POST /2/httpapi`). Accepts a single endpoint or a list — each is sent to concurrently and independently, so one endpoint failing doesn't block the others.
+
+```yaml
+clickstream:
+- name: "primary"
+  api_url: "http://clickstream:9999/2/httpapi"
+  api_key: "clickstream-key"
+- name: "backup"
+  api_url: "https://cb2.example.com/2/httpapi"
+  api_key: "other-key"
+```
+
+The `clickstream` backend must also be listed under `features.store_backends` to be active.
+
 ## Endpoints
 
 | Method | Path                       | Description              |
@@ -41,7 +59,7 @@ langfuse = Langfuse(
 | GET    | `/livez`                   | Liveness probe — instant 200, no dependency checks |
 | GET    | `/ready`                   | Readiness probe — checks S3 and ClickHouse; returns 200 or 503 |
 | GET    | `/health`                  | Full health status — JSON with component details |
-| GET    | `/metrics`                 | Prometheus metrics (ingestion counts, S3/clickstream latency and errors) |
+| GET    | `/metrics`                 | Prometheus metrics (ingestion counts, S3/clickstream endpoint latency and errors) |
 | POST   | `/api/public/ingestion`    | Ingest events (207)      |
 
 ### Kubernetes probes
@@ -55,7 +73,7 @@ The Helm chart (`chart/`) is configured to use:
 Prometheus alerting rules are in `devops/alerting/alert_rules.yml`:
 - Ingestion error rate and volume spikes
 - S3 save failures and latency
-- Clickstream forwarding errors
+- Clickstream forwarding errors (per endpoint)
 - P95/P99 request latency
 - Health check and availability
 

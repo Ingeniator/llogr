@@ -364,3 +364,39 @@ attributes. The mapping llogr applies:
 The OTEL path does not carry `completionStartTime`, `promptName`, `promptVersion`,
 `release`, `tags`, or `usageDetails` — these are Langfuse-specific fields only
 available via the HTTP ingestion path.
+
+---
+
+## OTEL path (Google ADK / OTel GenAI semantic conventions)
+
+The same `/api/public/otel/v1/traces` endpoint also accepts spans from Google ADK (and
+any other SDK following the [OTel GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/)).
+llogr detects the dialect per span — a span is treated as GenAI/ADK if it carries
+`gen_ai.operation_name` or `gen_ai.system`; otherwise it's parsed as Langfuse. The two
+dialects can be mixed in the same batch.
+
+Span names: `generate_content {model}` (LLM call), `invoke_agent`, `execute_tool`,
+`compact_events`. Only `generate_content` spans become `generation-create` (with model,
+usage, and params populated) — everything else becomes `span-create`.
+
+| OTEL attribute | Maps to llogr body field |
+|----------------|--------------------------|
+| `gen_ai.operation_name` | → `event_type` (`generation-create` iff `generate_content`, else `span-create`) |
+| `gen_ai.request.model` | → `body.model` |
+| `gen_ai.request.top_p` / `gen_ai.request.max_tokens` | → `body.modelParameters` |
+| `gen_ai.usage.input_tokens` / `gen_ai.usage.output_tokens` | → `body.usage` (`input`/`output`/`total`) |
+| `gen_ai.response.finish_reasons` (array; first element) | → `body.finishReason` |
+| `gen_ai.tool_name` / `gen_ai.agent_name` | → `body.name` (falls back to span name) |
+| `gen_ai.system` | → `body.metadata.provider` |
+| `gcp.vertex.agent.llm_request` / `tool_call_args` / `data` | → `body.input` |
+| `gcp.vertex.agent.llm_response` / `tool_response` | → `body.output` |
+| `gcp.vertex.agent.session_id` | → `body.sessionId` |
+| `user_id` | → `body.userId` |
+| any other `gen_ai.*` / `gcp.vertex.agent.*` key (e.g. `invocation_id`, `event_id`, `tool_call_id`) | → `body.metadata.*` |
+
+**Gaps:** ADK does not emit cost data, so `cost` / `input_cost` / `output_cost` stay `0`
+for ADK-sourced spans — llogr has no model-price table to derive cost from token counts.
+`gen_ai.response.finish_reasons` is set as an OTLP array attribute; llogr's protobuf
+flattening decodes `array_value` (JSON-encodes it) specifically to support this field.
+`finishReason` is a top-level body field rather than nested under `output.choices[0]`
+(Gemini responses aren't OpenAI-shaped), so `_extract_finish_reason` checks both shapes.

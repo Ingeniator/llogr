@@ -216,12 +216,15 @@ def _extract_cost(body: dict) -> tuple[float, float, float]:
 
 def _extract_finish_reason(body: dict) -> str:
     output = body.get("output")
-    if not isinstance(output, dict):
-        return ""
-    choices = output.get("choices")
-    if isinstance(choices, list) and choices and isinstance(choices[0], dict):
-        return str(choices[0].get("finish_reason") or "")
-    return ""
+    if isinstance(output, dict):
+        choices = output.get("choices")
+        if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+            reason = choices[0].get("finish_reason")
+            if reason:
+                return str(reason)
+    # Fallback: OTel GenAI dialect (e.g. Google ADK) has no OpenAI-shaped
+    # output, so the otel route promotes it to a top-level body field.
+    return str(body.get("finishReason") or "")
 
 
 def _extract_retrieval_query(body: dict) -> str:
