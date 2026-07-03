@@ -83,6 +83,7 @@ class ClickstreamConfig:
     verify_ssl: bool = True
     ca_bundle: str = ""     # path to CA bundle file
     name: str = ""          # optional label, used in logs when fanning out to several endpoints
+    agents: tuple[str, ...] = ()  # if non-empty, only forward batches whose agent name (X-Agent-Name) matches one of these
 
 
 @dataclass(frozen=True)
@@ -158,6 +159,7 @@ def _parse_clickstream_configs(raw: dict) -> tuple[ClickstreamConfig, ...]:
             verify_ssl=c.get("verify_ssl", True),
             ca_bundle=c.get("ca_bundle", ""),
             name=c.get("name", ""),
+            agents=tuple(c.get("agents", ())),
         )
         for c in raw_clickstream
     )

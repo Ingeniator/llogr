@@ -126,17 +126,20 @@ async def ingest(
 
     if "clickstream" in backends and settings.clickstream:
         from llogr.clickstream import send_to_clickstream
-        results = await asyncio.gather(
-            *(send_to_clickstream(batch, auth, cfg, input_hash=input_hash) for cfg in settings.clickstream),
-            return_exceptions=True,
-        )
-        for cfg, result in zip(settings.clickstream, results):
-            if isinstance(result, Exception):
-                logger.error("store_clickstream_failed", target=cfg.name or cfg.api_url, error=str(result))
-        if any(isinstance(r, Exception) for r in results):
-            failed.append("clickstream")
-        if any(not isinstance(r, Exception) for r in results):
-            stored_to.append("clickstream")
+        batch_agent_name = next((e.body.get("name", "") for e in batch if e.body.get("name")), "")
+        targets = [cfg for cfg in settings.clickstream if not cfg.agents or batch_agent_name in cfg.agents]
+        if targets:
+            results = await asyncio.gather(
+                *(send_to_clickstream(batch, auth, cfg, input_hash=input_hash) for cfg in targets),
+                return_exceptions=True,
+            )
+            for cfg, result in zip(targets, results):
+                if isinstance(result, Exception):
+                    logger.error("store_clickstream_failed", target=cfg.name or cfg.api_url, error=str(result))
+            if any(isinstance(r, Exception) for r in results):
+                failed.append("clickstream")
+            if any(not isinstance(r, Exception) for r in results):
+                stored_to.append("clickstream")
 
     for target in settings.features.forward:
         from llogr.forward import forward_batch
