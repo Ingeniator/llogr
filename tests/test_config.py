@@ -30,7 +30,8 @@ def test_load_config(tmp_path: Path) -> None:
 
     assert isinstance(settings, Settings)
     assert isinstance(settings.s3, S3Config)
-    assert isinstance(settings.clickstream, ClickstreamConfig)
+    assert len(settings.clickstream) == 1
+    assert isinstance(settings.clickstream[0], ClickstreamConfig)
 
     assert settings.s3.bucket == "test-bucket"
     assert settings.s3.region == "eu-west-1"
@@ -38,8 +39,46 @@ def test_load_config(tmp_path: Path) -> None:
     assert settings.s3.access_key_id == "AK"
     assert settings.s3.secret_access_key == "SK"
 
-    assert settings.clickstream.api_url == "https://cb.example.com/v1/events"
-    assert settings.clickstream.api_key == "key-123"
+    assert settings.clickstream[0].api_url == "https://cb.example.com/v1/events"
+    assert settings.clickstream[0].api_key == "key-123"
+
+
+def test_load_config_multiple_clickstream_endpoints(tmp_path: Path) -> None:
+    data = {
+        "s3": {
+            "bucket": "test-bucket",
+            "region": "eu-west-1",
+            "endpoint": None,
+            "access_key_id": "AK",
+            "secret_access_key": "SK",
+        },
+        "clickstream": [
+            {"name": "primary", "api_url": "https://cb1.example.com/v1/events", "api_key": "key-1"},
+            {"name": "secondary", "api_url": "https://cb2.example.com/v1/events", "api_key": "key-2", "verify_ssl": False},
+        ],
+    }
+    settings = load_config(_write_config(tmp_path, data))
+
+    assert len(settings.clickstream) == 2
+    assert settings.clickstream[0].name == "primary"
+    assert settings.clickstream[0].api_url == "https://cb1.example.com/v1/events"
+    assert settings.clickstream[1].name == "secondary"
+    assert settings.clickstream[1].api_url == "https://cb2.example.com/v1/events"
+    assert settings.clickstream[1].verify_ssl is False
+
+
+def test_load_config_no_clickstream_defaults_to_empty(tmp_path: Path) -> None:
+    data = {
+        "s3": {
+            "bucket": "test-bucket",
+            "region": "eu-west-1",
+            "endpoint": None,
+            "access_key_id": "AK",
+            "secret_access_key": "SK",
+        },
+    }
+    settings = load_config(_write_config(tmp_path, data))
+    assert settings.clickstream == ()
 
 
 def test_settings_are_frozen(tmp_path: Path) -> None:

@@ -124,14 +124,19 @@ async def ingest(
             logger.exception("store_clickhouse_failed")
             failed.append("clickhouse")
 
-    if "clickstream" in backends and settings.clickstream.api_url:
-        try:
-            from llogr.clickstream import send_to_clickstream
-            await send_to_clickstream(batch, auth, settings, input_hash=input_hash)
-            stored_to.append("clickstream")
-        except Exception:
-            logger.exception("store_clickstream_failed")
+    if "clickstream" in backends and settings.clickstream:
+        from llogr.clickstream import send_to_clickstream
+        results = await asyncio.gather(
+            *(send_to_clickstream(batch, auth, cfg, input_hash=input_hash) for cfg in settings.clickstream),
+            return_exceptions=True,
+        )
+        for cfg, result in zip(settings.clickstream, results):
+            if isinstance(result, Exception):
+                logger.error("store_clickstream_failed", target=cfg.name or cfg.api_url, error=str(result))
+        if any(isinstance(r, Exception) for r in results):
             failed.append("clickstream")
+        if any(not isinstance(r, Exception) for r in results):
+            stored_to.append("clickstream")
 
     for target in settings.features.forward:
         from llogr.forward import forward_batch

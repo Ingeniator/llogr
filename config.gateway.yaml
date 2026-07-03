@@ -9,6 +9,8 @@ s3:
   cors_origins:
   - "*"
 clickstream:
+  # Fan out to multiple Amplitude-compatible endpoints — add more entries to send events to several targets.
+- name: "primary"
   api_url: "http://clickstream:9999/2/httpapi"
   api_key: "clickstream-key"
 server:

@@ -82,6 +82,7 @@ class ClickstreamConfig:
     api_key: str = ""
     verify_ssl: bool = True
     ca_bundle: str = ""     # path to CA bundle file
+    name: str = ""          # optional label, used in logs when fanning out to several endpoints
 
 
 @dataclass(frozen=True)
@@ -138,10 +139,28 @@ class ServerConfig:
 @dataclass(frozen=True)
 class Settings:
     s3: S3Config
-    clickstream: ClickstreamConfig = ClickstreamConfig()
+    # One or more Amplitude-compatible endpoints, fanned out to on every ingest
+    clickstream: tuple[ClickstreamConfig, ...] = ()
     server: ServerConfig = ServerConfig()
     features: FeaturesConfig = FeaturesConfig()
     clickhouse: ClickHouseConfig = ClickHouseConfig()
+
+
+def _parse_clickstream_configs(raw: dict) -> tuple[ClickstreamConfig, ...]:
+    """Accept either a single endpoint (legacy `clickstream: {...}`) or a list of endpoints."""
+    raw_clickstream = raw.get("clickstream") or []
+    if isinstance(raw_clickstream, dict):
+        raw_clickstream = [raw_clickstream]
+    return tuple(
+        ClickstreamConfig(
+            api_url=c["api_url"],
+            api_key=c.get("api_key", ""),
+            verify_ssl=c.get("verify_ssl", True),
+            ca_bundle=c.get("ca_bundle", ""),
+            name=c.get("name", ""),
+        )
+        for c in raw_clickstream
+    )
 
 
 def load_config(path: str | Path) -> Settings:
@@ -154,7 +173,7 @@ def load_config(path: str | Path) -> Settings:
             **raw["s3"],
             "cors_origins": tuple(raw["s3"].get("cors_origins", ())),
         }),
-        clickstream=ClickstreamConfig(**raw.get("clickstream", {})),
+        clickstream=_parse_clickstream_configs(raw),
         server=ServerConfig(**raw.get("server", {})),
         features=FeaturesConfig(**{
             **{k: v for k, v in raw.get("features", {}).items() if k not in ("store_backends", "forward", "superadmin_access")},

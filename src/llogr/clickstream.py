@@ -11,7 +11,7 @@ import structlog
 
 from llogr.auth import AuthContext
 from llogr.clickhouse import _extract_prompt_hash
-from llogr.config import Settings
+from llogr.config import ClickstreamConfig
 from llogr.metrics import CLICKSTREAM_FORWARD_ERRORS, CLICKSTREAM_FORWARD_SECONDS
 from llogr.models import IngestionEvent
 
@@ -54,11 +54,10 @@ def transform_to_amplitude(events: list[IngestionEvent], auth: AuthContext, inpu
 async def send_to_clickstream(
     events: list[IngestionEvent],
     auth: AuthContext,
-    settings: Settings,
+    cfg: ClickstreamConfig,
     input_hash: str = "",
 ) -> None:
-    """Send events to a Clickstream/Amplitude-compatible endpoint using POST /2/httpapi."""
-    cfg = settings.clickstream
+    """Send events to a single Clickstream/Amplitude-compatible endpoint using POST /2/httpapi."""
     amplitude_events = transform_to_amplitude(events, auth, input_hash=input_hash)
 
     payload = {
@@ -84,10 +83,10 @@ async def send_to_clickstream(
             except Exception:
                 if attempt < max_retries - 1:
                     delay = 0.5 * (2 ** attempt)
-                    logger.warning("clickstream_forward_retry", attempt=attempt + 1, delay=delay)
+                    logger.warning("clickstream_forward_retry", target=cfg.name or cfg.api_url, attempt=attempt + 1, delay=delay)
                     await asyncio.sleep(delay)
                 else:
                     CLICKSTREAM_FORWARD_ERRORS.inc()
                     raise
 
-    logger.info("forwarded_to_clickstream", events=len(amplitude_events))
+    logger.info("forwarded_to_clickstream", target=cfg.name or cfg.api_url, events=len(amplitude_events))
