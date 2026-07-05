@@ -9,7 +9,7 @@ import pytest
 
 from llogr.auth import AuthContext
 from llogr.clickstream import send_to_clickstream
-from llogr.config import ClickstreamConfig
+from llogr.config import ClickstreamConfig, FeaturesConfig, S3Config, Settings
 from llogr.models import IngestionEvent
 
 _EVENT = IngestionEvent(
@@ -72,3 +72,59 @@ async def test_fanout_one_endpoint_failing_does_not_block_the_other(respx_mock):
 
     assert results[0] is None
     assert isinstance(results[1], Exception)
+
+
+def _fake_settings(*clickstream_cfgs: ClickstreamConfig) -> Settings:
+    return Settings(
+        s3=S3Config(bucket="b", region="r", endpoint=None, access_key_id="a", secret_access_key="s"),
+        clickstream=clickstream_cfgs,
+        features=FeaturesConfig(store_backends=("clickstream",)),
+    )
+
+
+@pytest.mark.asyncio
+async def test_ingest_only_forwards_to_endpoints_matching_agent_filter(monkeypatch):
+    """Endpoints with `agents` set only receive batches from those agents; endpoints without a filter get everything."""
+    from llogr import processing
+
+    cfg_matching = ClickstreamConfig(name="matching", api_url="https://cb1.example.com/2/httpapi", agents=("research-assistant",))
+    cfg_other = ClickstreamConfig(name="other", api_url="https://cb2.example.com/2/httpapi", agents=("support-bot",))
+    cfg_unfiltered = ClickstreamConfig(name="unfiltered", api_url="https://cb3.example.com/2/httpapi")
+
+    monkeypatch.setattr(processing, "get_settings", lambda: _fake_settings(cfg_matching, cfg_other, cfg_unfiltered))
+
+    sent_to: list[str] = []
+
+    async def fake_send(batch, auth, cfg, input_hash=""):
+        sent_to.append(cfg.name)
+
+    monkeypatch.setattr("llogr.clickstream.send_to_clickstream", fake_send)
+
+    event = IngestionEvent(id="evt-1", timestamp="2026-05-19T10:00:00.000", type="trace-create", body={})
+    failed = await processing.ingest([event], _AUTH, agent_name="research-assistant")
+
+    assert failed == []
+    assert set(sent_to) == {"matching", "unfiltered"}
+
+
+@pytest.mark.asyncio
+async def test_ingest_without_agent_name_only_reaches_unfiltered_endpoints(monkeypatch):
+    from llogr import processing
+
+    cfg_filtered = ClickstreamConfig(name="filtered", api_url="https://cb1.example.com/2/httpapi", agents=("research-assistant",))
+    cfg_unfiltered = ClickstreamConfig(name="unfiltered", api_url="https://cb2.example.com/2/httpapi")
+
+    monkeypatch.setattr(processing, "get_settings", lambda: _fake_settings(cfg_filtered, cfg_unfiltered))
+
+    sent_to: list[str] = []
+
+    async def fake_send(batch, auth, cfg, input_hash=""):
+        sent_to.append(cfg.name)
+
+    monkeypatch.setattr("llogr.clickstream.send_to_clickstream", fake_send)
+
+    event = IngestionEvent(id="evt-1", timestamp="2026-05-19T10:00:00.000", type="trace-create", body={})
+    failed = await processing.ingest([event], _AUTH)
+
+    assert failed == []
+    assert sent_to == ["unfiltered"]

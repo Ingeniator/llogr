@@ -54,7 +54,13 @@ def test_load_config_multiple_clickstream_endpoints(tmp_path: Path) -> None:
         },
         "clickstream": [
             {"name": "primary", "api_url": "https://cb1.example.com/v1/events", "api_key": "key-1"},
-            {"name": "secondary", "api_url": "https://cb2.example.com/v1/events", "api_key": "key-2", "verify_ssl": False},
+            {
+                "name": "secondary",
+                "api_url": "https://cb2.example.com/v1/events",
+                "api_key": "key-2",
+                "verify_ssl": False,
+                "agents": ["research-assistant", "support-bot"],
+            },
         ],
     }
     settings = load_config(_write_config(tmp_path, data))
@@ -62,9 +68,11 @@ def test_load_config_multiple_clickstream_endpoints(tmp_path: Path) -> None:
     assert len(settings.clickstream) == 2
     assert settings.clickstream[0].name == "primary"
     assert settings.clickstream[0].api_url == "https://cb1.example.com/v1/events"
+    assert settings.clickstream[0].agents == ()
     assert settings.clickstream[1].name == "secondary"
     assert settings.clickstream[1].api_url == "https://cb2.example.com/v1/events"
     assert settings.clickstream[1].verify_ssl is False
+    assert settings.clickstream[1].agents == ("research-assistant", "support-bot")
 
 
 def test_load_config_no_clickstream_defaults_to_empty(tmp_path: Path) -> None:

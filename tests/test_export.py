@@ -97,7 +97,7 @@ def test_export_streams_jsonl_lines(client, auth_headers):
 def test_export_passes_auth_project_id_to_clickhouse(auth_headers):
     captured = {}
 
-    async def _fake_export(project_id, settings, start, end, is_org_admin=False):
+    async def _fake_export(project_id, settings, start, end, is_org_admin=False, is_super_admin=False, session_id=None):
         captured["project_id"] = project_id
         captured["is_org_admin"] = is_org_admin
         yield '{"event_id":"x"}\n'
@@ -124,7 +124,7 @@ def test_export_org_admin_sets_flag():
 
     captured = {}
 
-    async def _fake_export(project_id, settings, start, end, is_org_admin=False):
+    async def _fake_export(project_id, settings, start, end, is_org_admin=False, is_super_admin=False, session_id=None):
         captured["is_org_admin"] = is_org_admin
         yield '{"event_id":"x"}\n'
 

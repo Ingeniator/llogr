@@ -48,9 +48,12 @@ clickstream:
 - name: "backup"
   api_url: "https://cb2.example.com/2/httpapi"
   api_key: "other-key"
+  agents: ["research-assistant"]
 ```
 
 The `clickstream` backend must also be listed under `features.store_backends` to be active.
+
+Set `agents` on an endpoint to only forward batches from those agents (matched against the `X-Agent-Name` request header); omit it to receive every agent's events, as `"primary"` does above.
 
 ## Endpoints
 

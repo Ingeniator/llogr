@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from llogr.auth import AuthContext
-from llogr.config import ClickbeatConfig, S3Config, Settings
+from llogr.config import ClickstreamConfig, S3Config, Settings
 from llogr.main import app
 from llogr.s3 import KeyMeta, list_batch_keys, list_batch_urls, parse_key_meta
 
@@ -22,7 +22,7 @@ def settings() -> Settings:
             access_key_id="testing",
             secret_access_key="testing",
         ),
-        clickbeat=ClickbeatConfig(api_url="http://x", api_key="k"),
+        clickstream=(ClickstreamConfig(api_url="http://x", api_key="k"),),
     )
 
 
@@ -161,9 +161,7 @@ async def test_list_batch_urls_inclusive_boundaries(settings: Settings, auth: Au
 
 @pytest.fixture
 def log_client():
-    with patch("llogr.routes.ingestion.stage1_save_raw", new_callable=AsyncMock), \
-         patch("llogr.routes.ingestion.stage2_forward_to_clickbeat", new_callable=AsyncMock):
-        yield TestClient(app)
+    return TestClient(app)
 
 
 @pytest.fixture
@@ -207,7 +205,7 @@ def test_get_logs_passes_filters(log_client: TestClient, auth_headers: dict):
 def test_get_logs_requires_auth(log_client: TestClient):
     with patch("llogr.routes.logs.list_batch_urls", new_callable=AsyncMock, return_value=[]):
         resp = log_client.get("/api/public/logs?start=2026-03-01T00:00:00Z&end=2026-03-02T00:00:00Z")
-    assert resp.status_code == 422
+    assert resp.status_code == 401
 
 
 def test_get_logs_requires_params(log_client: TestClient, auth_headers: dict):

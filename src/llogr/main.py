@@ -1,6 +1,15 @@
 from __future__ import annotations
 
+# ruff: noqa: E402
 import os
+
+# Prometheus multiprocess setup — must happen before `prometheus_client` (or
+# any llogr module) is imported. prometheus_client decides once, at its own
+# import time, whether metrics are mmap-backed based on this env var; setting
+# it later is too late even for llogr's own Counter/Histogram objects.
+_METRICS_DIR = os.environ.get("PROMETHEUS_MULTIPROC_DIR", "/tmp/prometheus_multiproc")
+os.environ["PROMETHEUS_MULTIPROC_DIR"] = _METRICS_DIR
+os.makedirs(_METRICS_DIR, exist_ok=True)
 
 import structlog
 from fastapi import FastAPI, Request
@@ -23,11 +32,6 @@ from llogr.routes.sessions import router as sessions_router
 from llogr.routes.ui import router as ui_router
 
 settings = get_settings()
-
-# Prometheus multiprocess setup — must happen before any metrics are created
-_METRICS_DIR = os.environ.get("PROMETHEUS_MULTIPROC_DIR", "/tmp/prometheus_multiproc")
-os.environ["PROMETHEUS_MULTIPROC_DIR"] = _METRICS_DIR
-os.makedirs(_METRICS_DIR, exist_ok=True)
 
 app = FastAPI(title="llogr", version="0.1.0", root_path=settings.server.root_path)
 

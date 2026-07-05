@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from llogr.auth import AuthContext
-from llogr.config import ClickbeatConfig, S3Config, Settings
+from llogr.config import ClickstreamConfig, S3Config, Settings
 from llogr.models import IngestionEvent
 from llogr.s3 import (
     extract_input_hash,
@@ -28,7 +28,7 @@ def settings() -> Settings:
             access_key_id="testing",
             secret_access_key="testing",
         ),
-        clickbeat=ClickbeatConfig(api_url="http://x", api_key="k"),
+        clickstream=(ClickstreamConfig(api_url="http://x", api_key="k"),),
     )
 
 
