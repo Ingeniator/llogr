@@ -146,11 +146,21 @@ def _span_to_event_langfuse(span, attrs: dict[str, str]) -> IngestionEvent:
     body["output"] = _try_json(attrs.get(_LF + "output"))
     body["metadata"] = _collect_metadata(attrs, _LF)
 
+    # Agent name travels as span metadata (not a per-request ingestion header,
+    # since the OTLP exporter batches spans from many requests through one
+    # shared, cached client — a header couldn't be attributed to the right
+    # span). Mirrors the GenAI dialect's tool_name/agent_name → name mapping.
+    agent_name = (body["metadata"] or {}).get("agent_name") if body["metadata"] else None
+    if agent_name:
+        body["name"] = agent_name
+
     if obs_type in ("generation", "generation-create"):
         body["model"] = attrs.get(_LF + "model.name")
         body["usage"] = _try_json(attrs.get(_LF + "usage_details"))
         body["costDetails"] = _try_json(attrs.get(_LF + "cost_details"))
         body["modelParameters"] = _try_json(attrs.get(_LF + "model.parameters"))
+        body["promptName"] = attrs.get(_LF + "prompt.name")
+        body["promptVersion"] = attrs.get(_LF + "prompt.version")
         event_type = "generation-create"
     else:
         event_type = "span-create"
@@ -162,6 +172,7 @@ def _span_to_event_langfuse(span, attrs: dict[str, str]) -> IngestionEvent:
         body.setdefault("input", trace_input)
     if trace_output is not None:
         body.setdefault("output", trace_output)
+    body["tags"] = _try_json(attrs.get(_LF_TRACE + "tags"))
 
     body["userId"] = attrs.get("user.id")
     body["sessionId"] = attrs.get("session.id")
