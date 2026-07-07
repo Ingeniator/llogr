@@ -89,6 +89,7 @@
   </div>
   <div class="header-right">
     <span id="statusLine" class="status-line"></span>
+    <button class="btn btn-secondary" id="downloadCsvBtn" style="padding:5px 12px;font-size:0.8rem">Download CSV</button>
     <button class="btn btn-secondary" id="refreshBtn" style="padding:5px 12px;font-size:0.8rem">Refresh</button>
   </div>
 </div>
@@ -184,6 +185,7 @@
   const BASE        = '{{ base_path }}';
   const WHO_API     = BASE + '/api/public/billing/who';
   const BILLING_API = BASE + '/api/public/billing/summary';
+  const EXPORT_API  = BASE + '/api/public/billing/export';
   const PAGE_SIZE   = 500;
 
   let currentRole    = 'USER';
@@ -397,6 +399,11 @@
 
   document.getElementById('refreshBtn').addEventListener('click', function () { loadPage(true); });
   document.getElementById('loadMoreBtn').addEventListener('click', function () { loadPage(false); });
+
+  document.getElementById('downloadCsvBtn').addEventListener('click', function () {
+    const params = new URLSearchParams(buildApiParams());
+    window.location.href = EXPORT_API + '?' + params;
+  });
 
   // ── Init ───────────────────────────────────────────────────────────────────
 

@@ -1,13 +1,16 @@
 """Billing summary endpoint and dashboard page — spend aggregated from ClickHouse."""
 from __future__ import annotations
 
+import csv
+import io
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from jinja2 import Environment, FileSystemLoader
 
 from llogr.auth import AuthContext, get_auth
@@ -130,6 +133,86 @@ async def billing_summary(
     )
 
     return {"period": period_label, **data}
+
+
+_CSV_EXPORT_USER_LIMIT = 100_000
+_UNSAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9_.-]")
+
+
+@router.get("/api/public/billing/export")
+async def billing_export(
+    period: str = Query(
+        default="",
+        description="Calendar month in YYYY-MM format (e.g. 2026-06). Mutually exclusive with start/end.",
+    ),
+    start: Optional[str] = Query(default=None, description="Range start in ISO 8601 format. Requires 'end'."),
+    end: Optional[str] = Query(default=None, description="Range end in ISO 8601 format. Requires 'start'."),
+    auth: AuthContext = Depends(get_auth),
+    settings: Settings = Depends(get_settings),
+):
+    """Download spend for a billing period as CSV.
+
+    Same scoping and period rules as `/api/public/billing/summary`, but returns
+    every group and (for admins) every user in the period rather than a page.
+    """
+    if not settings.clickhouse.url:
+        raise HTTPException(status_code=503, detail="ClickHouse not configured")
+
+    period_start, period_end, period_label = _resolve_range(period, start, end)
+
+    from llogr.clickhouse import get_billing_summary_ch
+    data = await get_billing_summary_ch(
+        project_id=auth.public_key,
+        settings=settings,
+        is_org_admin=auth.is_org_admin,
+        is_super_admin=auth.is_super_admin,
+        period_start=period_start,
+        period_end=period_end,
+        user_limit=_CSV_EXPORT_USER_LIMIT,
+        user_offset=0,
+    )
+
+    if data.get("has_more"):
+        logger.warning(
+            "billing_export_truncated",
+            project_id=auth.public_key,
+            period=period_label,
+            user_limit=_CSV_EXPORT_USER_LIMIT,
+        )
+
+    def _generate():
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+
+        def _flush() -> str:
+            value = buf.getvalue()
+            buf.seek(0)
+            buf.truncate(0)
+            return value
+
+        writer.writerow(["scope", "id", "total_usd", "input_usd", "output_usd", "requests"])
+        yield _flush()
+        for g in data["groups"]:
+            writer.writerow(["org", g["org"], g["group_spent"], g["input_spent"], g["output_spent"], g["request_count"]])
+            yield _flush()
+        for u in data["users"]:
+            writer.writerow(["user", u["project_id"], u["user_spent"], u["input_spent"], u["output_spent"], u["request_count"]])
+            yield _flush()
+
+    logger.info(
+        "billing_export",
+        project_id=auth.public_key,
+        period=period_label,
+        groups=len(data["groups"]),
+        users=len(data["users"]),
+    )
+
+    filename = f"billing-{_UNSAFE_FILENAME_RE.sub('_', period_label)}.csv"
+    return StreamingResponse(
+        _generate(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/api/public/billing/who")
