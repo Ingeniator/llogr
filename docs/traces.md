@@ -219,6 +219,21 @@ input_hash, prompt_hash
 | `x-agent-name` | Overwrites `body.name` (→ `name` column) on **all** events unconditionally |
 | `x-session-id` | Stamps `body.sessionId` only on events that have no `sessionId` yet |
 
+### OTLP resource attribute that mutates trace data
+
+For the `/api/public/otel/v1/traces` path there's no per-request header to carry
+an agent name (the OTLP exporter batches spans from many requests through one
+shared, cached client — see the note in `_span_to_event_langfuse`). Instead,
+llogr reads the **resource-level** `service.name` attribute — set once per
+process, typically via the `OTEL_SERVICE_NAME` env var or
+`Resource.create({"service.name": ...})` — and applies it exactly like
+`x-agent-name`: it overwrites `body.name` unconditionally for every span under
+that `resource_spans` block, regardless of dialect (Langfuse or GenAI) or any
+per-span `agent_name`/`tool_name` attribute.
+
+Plain OTel SDKs with no Langfuse- or GenAI-specific instrumentation get a
+usable `name` column for free this way, just by setting `OTEL_SERVICE_NAME`.
+
 ### Present in body only (no column — JSON extraction required)
 
 ✅ = yallmp sends this field; ⚠️ = partial; ❌ = not instrumented at all

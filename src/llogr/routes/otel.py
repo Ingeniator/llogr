@@ -73,11 +73,11 @@ def _flatten_scalar(v) -> str | None:
     return None
 
 
-def _span_attrs(span) -> dict[str, str]:
-    """Flatten protobuf KeyValue list into a plain dict. Array values (e.g.
+def _flatten_attrs(attrs) -> dict[str, str]:
+    """Flatten a protobuf KeyValue list into a plain dict. Array values (e.g.
     ADK's gen_ai.response.finish_reasons) are JSON-encoded."""
     out: dict[str, str] = {}
-    for kv in span.attributes:
+    for kv in attrs:
         key = kv.key
         v = kv.value
         if v.HasField("array_value"):
@@ -88,6 +88,11 @@ def _span_attrs(span) -> dict[str, str]:
         if scalar is not None:
             out[key] = scalar
     return out
+
+
+def _span_attrs(span) -> dict[str, str]:
+    """Flatten a span's own attributes (not the resource's) into a plain dict."""
+    return _flatten_attrs(span.attributes)
 
 
 def _try_json(val: str | None):
@@ -117,11 +122,21 @@ def _is_genai_dialect(attrs: dict[str, str]) -> bool:
     return (_GENAI + "operation_name") in attrs or (_GENAI + "system") in attrs
 
 
-def _span_to_event(span, attrs: dict[str, str]) -> IngestionEvent:
-    """Convert a single OTLP span to an IngestionEvent, dispatching on attribute dialect."""
+def _span_to_event(span, attrs: dict[str, str], service_name: str | None = None) -> IngestionEvent:
+    """Convert a single OTLP span to an IngestionEvent, dispatching on attribute dialect.
+
+    `service_name` is the resource-level `service.name` attribute (set once per
+    exporter, e.g. via `OTEL_SERVICE_NAME`) — when present it overwrites `name`
+    unconditionally, the same way the `x-agent-name` ingestion header does for
+    the Langfuse SDK path.
+    """
     if _is_genai_dialect(attrs):
-        return _span_to_event_genai(span, attrs)
-    return _span_to_event_langfuse(span, attrs)
+        event = _span_to_event_genai(span, attrs)
+    else:
+        event = _span_to_event_langfuse(span, attrs)
+    if service_name:
+        event.body["name"] = service_name
+    return event
 
 
 def _span_to_event_langfuse(span, attrs: dict[str, str]) -> IngestionEvent:
@@ -303,10 +318,12 @@ async def otel_ingest(
 
     events: list[IngestionEvent] = []
     for resource_spans in req.resource_spans:
+        resource_attrs = _flatten_attrs(resource_spans.resource.attributes)
+        service_name = resource_attrs.get("service.name")
         for scope_spans in resource_spans.scope_spans:
             for span in scope_spans.spans:
                 attrs = _span_attrs(span)
-                events.append(_span_to_event(span, attrs))
+                events.append(_span_to_event(span, attrs, service_name))
 
     if events:
         await ingest(events, auth, session_id=x_session_id, agent_name=x_agent_name)

@@ -141,3 +141,35 @@ def test_langfuse_dialect_still_works() -> None:
     assert event.body["model"] == "claude-sonnet-4-6"
     assert event.body["userId"] == "user-2"
     assert event.body["sessionId"] == "sess-2"
+
+
+def test_resource_service_name_overrides_span_name() -> None:
+    span = _make_span("llm-call", {
+        "langfuse.observation.type": "generation",
+        "langfuse.observation.model.name": "claude-sonnet-4-6",
+    })
+
+    event = _span_to_event(span, _span_attrs(span), service_name="checkout-service")
+
+    assert event.body["name"] == "checkout-service"
+
+
+def test_resource_service_name_overrides_genai_agent_name() -> None:
+    span = _make_span("generate_content gemini-2.0-flash", {
+        "gen_ai.operation_name": "generate_content",
+        "gen_ai.agent_name": "some-agent",
+    })
+
+    event = _span_to_event(span, _span_attrs(span), service_name="checkout-service")
+
+    assert event.body["name"] == "checkout-service"
+
+
+def test_no_service_name_leaves_span_name_untouched() -> None:
+    span = _make_span("llm-call", {
+        "langfuse.observation.type": "generation",
+    })
+
+    event = _span_to_event(span, _span_attrs(span))
+
+    assert event.body["name"] == "llm-call"
