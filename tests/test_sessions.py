@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import json
 from contextlib import asynccontextmanager, contextmanager
+from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -441,4 +442,115 @@ def test_route_response_shape(client, auth_headers):
 
 def test_route_requires_auth(client):
     resp = client.get("/api/public/sessions/sess-abc")
+    assert resp.status_code in (401, 403)
+
+
+# ---------------------------------------------------------------------------
+# GET /api/public/traces — agent_name / session_id filtering
+# ---------------------------------------------------------------------------
+
+def test_traces_route_requires_agent_name_or_session_id(client, auth_headers):
+    settings = Settings(s3=_S3_CFG, clickhouse=ClickHouseConfig(url="http://ch:8123"))
+    with _override_settings(settings):
+        resp = client.get("/api/public/traces", headers=auth_headers)
+    assert resp.status_code == 400
+
+
+def test_traces_route_requires_clickhouse(client, auth_headers):
+    settings = Settings(s3=_S3_CFG)
+    with _override_settings(settings):
+        resp = client.get("/api/public/traces?agent_name=my-agent", headers=auth_headers)
+    assert resp.status_code == 503
+
+
+def test_traces_route_filters_by_agent_name(client, auth_headers):
+    settings = Settings(s3=_S3_CFG, clickhouse=ClickHouseConfig(url="http://ch:8123"))
+    traces = [{"event_id": "e1", "event_type": "generation-create", "timestamp": "t",
+               "project_id": "pk-test", "model": "m", "name": "my-agent",
+               "session_id": "s", "trace_id": "t", "body": {}}]
+
+    with _override_settings(settings):
+        with patch("llogr.clickhouse.list_traces_ch", new=AsyncMock(return_value=traces)) as mock_fn:
+            resp = client.get("/api/public/traces?agent_name=my-agent", headers=auth_headers)
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["agent_name"] == "my-agent"
+    assert data["traces"][0]["event_id"] == "e1"
+    assert mock_fn.call_args.kwargs["agent_name"] == "my-agent"
+    assert mock_fn.call_args.kwargs["session_id"] is None
+
+
+def test_traces_route_filters_by_session_id(client, auth_headers):
+    settings = Settings(s3=_S3_CFG, clickhouse=ClickHouseConfig(url="http://ch:8123"))
+    traces = [{"event_id": "e2", "event_type": "span-create", "timestamp": "t",
+               "project_id": "pk-test", "model": "", "name": "",
+               "session_id": "sess-abc", "trace_id": "t", "body": {}}]
+
+    with _override_settings(settings):
+        with patch("llogr.clickhouse.list_traces_ch", new=AsyncMock(return_value=traces)) as mock_fn:
+            resp = client.get("/api/public/traces?session_id=sess-abc", headers=auth_headers)
+
+    assert resp.status_code == 200
+    assert resp.json()["session_id"] == "sess-abc"
+    assert mock_fn.call_args.kwargs["session_id"] == "sess-abc"
+
+
+def test_traces_route_combines_agent_name_and_session_id(client, auth_headers):
+    settings = Settings(s3=_S3_CFG, clickhouse=ClickHouseConfig(url="http://ch:8123"))
+
+    with _override_settings(settings):
+        with patch("llogr.clickhouse.list_traces_ch", new=AsyncMock(return_value=[])) as mock_fn:
+            resp = client.get(
+                "/api/public/traces?agent_name=my-agent&session_id=sess-abc",
+                headers=auth_headers,
+            )
+
+    assert resp.status_code == 200
+    assert mock_fn.call_args.kwargs["agent_name"] == "my-agent"
+    assert mock_fn.call_args.kwargs["session_id"] == "sess-abc"
+
+
+def test_traces_route_requires_auth(client):
+    resp = client.get("/api/public/traces?agent_name=my-agent")
+    assert resp.status_code in (401, 403)
+
+
+# ---------------------------------------------------------------------------
+# GET /api/public/agents — Jaeger-style service list
+# ---------------------------------------------------------------------------
+
+def test_agents_route_requires_clickhouse(client, auth_headers):
+    settings = Settings(s3=_S3_CFG)
+    with _override_settings(settings):
+        resp = client.get("/api/public/agents", headers=auth_headers)
+    assert resp.status_code == 503
+
+
+def test_agents_route_response_shape(client, auth_headers):
+    settings = Settings(s3=_S3_CFG, clickhouse=ClickHouseConfig(url="http://ch:8123"))
+
+    with _override_settings(settings):
+        with patch("llogr.clickhouse.list_agent_names_ch", new=AsyncMock(return_value=["agent-a", "agent-b"])):
+            resp = client.get("/api/public/agents", headers=auth_headers)
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data == {"data": ["agent-a", "agent-b"], "total": 2, "limit": 0, "offset": 0, "errors": None}
+
+
+def test_agents_route_defaults_to_7_day_lookback(client, auth_headers):
+    settings = Settings(s3=_S3_CFG, clickhouse=ClickHouseConfig(url="http://ch:8123"))
+
+    with _override_settings(settings):
+        with patch("llogr.clickhouse.list_agent_names_ch", new=AsyncMock(return_value=[])) as mock_fn:
+            resp = client.get("/api/public/agents", headers=auth_headers)
+
+    assert resp.status_code == 200
+    kwargs = mock_fn.call_args.kwargs
+    assert (kwargs["end"] - kwargs["start"]) == timedelta(days=7)
+
+
+def test_agents_route_requires_auth(client):
+    resp = client.get("/api/public/agents")
     assert resp.status_code in (401, 403)

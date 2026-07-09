@@ -798,3 +798,147 @@ async def get_session_traces_ch(
     except Exception as e:
         logger.error("clickhouse_session_traces_failed", error=str(e))
         return []
+
+
+async def list_traces_ch(
+    project_id: str,
+    settings: Settings,
+    agent_name: str | None = None,
+    session_id: str | None = None,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    is_org_admin: bool = False,
+    is_super_admin: bool = False,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[dict]:
+    """Return trace events filtered by agent name (`name` column) and/or session_id.
+
+    At least one of `agent_name` / `session_id` is expected by the caller — this
+    function does not enforce it, so an unfiltered call scans the full org/project
+    scope ordered by timestamp.
+    """
+    cfg = settings.clickhouse
+    if not cfg.url:
+        return []
+
+    if is_super_admin:
+        conditions: list[str] = []
+        params: dict[str, str] = {}
+    elif is_org_admin and "/" in project_id:
+        org = project_id.split("/", 1)[0]
+        conditions = ["project_id LIKE {project_id:String}"]
+        params = {"project_id": f"{org}/%"}
+    else:
+        conditions = ["project_id = {project_id:String}"]
+        params = {"project_id": project_id}
+
+    conditions.append("event_type IN ('generation-create', 'generation-update', 'span-create', 'span-update')")
+
+    if agent_name:
+        conditions.append("name = {agent_name:String}")
+        params["agent_name"] = agent_name
+    if session_id:
+        conditions.append("session_id = {session_id:String}")
+        params["session_id"] = session_id
+    if start:
+        conditions.append("timestamp >= {start:String}")
+        params["start"] = start.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+    if end:
+        conditions.append("timestamp <= {end:String}")
+        params["end"] = end.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+
+    where = " AND ".join(conditions)
+    sql = f"""
+        SELECT event_id, event_type, timestamp, project_id, model, name, trace_id, session_id, body
+        FROM {cfg.database}.{cfg.table}
+        WHERE {where}
+        ORDER BY timestamp DESC
+        LIMIT {min(limit, 500)} OFFSET {offset}
+        FORMAT JSON
+    """
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                _ch_url(cfg),
+                params={**_ch_params(cfg), "query": sql, **{f"param_{k}": v for k, v in params.items()}},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        results = []
+        for row in data.get("data", []):
+            try:
+                body = json.loads(row.get("body", "{}"))
+            except (json.JSONDecodeError, TypeError):
+                body = {}
+            results.append({
+                "event_id": row.get("event_id", ""),
+                "event_type": row.get("event_type", ""),
+                "timestamp": row.get("timestamp", ""),
+                "project_id": row.get("project_id", ""),
+                "model": row.get("model", ""),
+                "name": row.get("name", ""),
+                "session_id": row.get("session_id", ""),
+                "trace_id": row.get("trace_id", ""),
+                "body": body,
+            })
+        return results
+    except Exception as e:
+        logger.error("clickhouse_list_traces_failed", error=str(e))
+        return []
+
+
+async def list_agent_names_ch(
+    project_id: str,
+    settings: Settings,
+    is_org_admin: bool = False,
+    is_super_admin: bool = False,
+    start: datetime | None = None,
+    end: datetime | None = None,
+) -> list[str]:
+    """Return distinct agent names (`name` column). Mirrors Jaeger's GET /api/services."""
+    cfg = settings.clickhouse
+    if not cfg.url:
+        return []
+
+    if is_super_admin:
+        conditions: list[str] = []
+        params: dict[str, str] = {}
+    elif is_org_admin and "/" in project_id:
+        org = project_id.split("/", 1)[0]
+        conditions = ["project_id LIKE {project_id:String}"]
+        params = {"project_id": f"{org}/%"}
+    else:
+        conditions = ["project_id = {project_id:String}"]
+        params = {"project_id": project_id}
+
+    conditions.append("name != ''")
+    if start:
+        conditions.append("timestamp >= {start:String}")
+        params["start"] = start.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+    if end:
+        conditions.append("timestamp <= {end:String}")
+        params["end"] = end.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+
+    where = " AND ".join(conditions)
+    sql = f"""
+        SELECT DISTINCT name
+        FROM {cfg.database}.{cfg.table}
+        WHERE {where}
+        ORDER BY name
+        FORMAT JSON
+    """
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                _ch_url(cfg),
+                params={**_ch_params(cfg), "query": sql, **{f"param_{k}": v for k, v in params.items()}},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        return [row["name"] for row in data.get("data", []) if row.get("name")]
+    except Exception as e:
+        logger.error("clickhouse_list_agent_names_failed", error=str(e))
+        return []
