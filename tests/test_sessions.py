@@ -72,9 +72,7 @@ def _make_s3_client(pointer_keys: list[str], key_bodies: dict[str, bytes]) -> Ma
         yield {"Contents": [{"Key": k} for k in matching]}
 
     mock_paginator = MagicMock()
-    mock_paginator.paginate = MagicMock(return_value=_AsyncIter([
-        {"Contents": [{"Key": k} for k in pointer_keys]}
-    ]))
+    mock_paginator.paginate = _paginate
 
     mock_client = AsyncMock()
     mock_client.get_object = _get_object
@@ -201,6 +199,67 @@ async def test_s3_session_traces_empty_when_no_pointers(auth, settings_s3_only):
         traces = await get_session_traces_s3("sess-abc", auth, settings_s3_only)
 
     assert traces == []
+
+
+@pytest.mark.asyncio
+async def test_s3_session_traces_org_admin_sees_sibling_project(settings_s3_only):
+    """Org admin querying under tenant/project-a must also find a session ingested
+    under a sibling tenant/project-b — the tight per-project prefix used for
+    regular callers would miss it entirely."""
+    auth = AuthContext(public_key="tenant/project-a", secret_key="", is_org_admin=True)
+    sibling_pointer = "tenant/project-b/.sessions/sess-abc/aabb1122"
+    sibling_main_key = "tenant/project-b/sess-abc_tr-1_chat_abc12345_20260101T000000Z_aabbccdd.jsonl"
+    decoy_pointer = "tenant/project-b/.sessions/other-session/ffee5566"
+
+    mock_session = _make_s3_client(
+        pointer_keys=[sibling_pointer, decoy_pointer],
+        key_bodies={
+            sibling_pointer: sibling_main_key.encode(),
+            sibling_main_key: _jsonl(GEN_EVENT),
+        },
+    )
+
+    with patch("llogr.s3.aioboto3.Session", return_value=mock_session):
+        traces = await get_session_traces_s3("sess-abc", auth, settings_s3_only, is_org_admin=True)
+
+    assert len(traces) == 1
+    assert traces[0]["event_id"] == "evt-1"
+
+
+@pytest.mark.asyncio
+async def test_s3_session_traces_org_admin_does_not_see_other_tenant(settings_s3_only):
+    """Org admin scope is bounded to their own tenant — a session under a
+    different tenant must not leak in even though it's returned by the mock."""
+    auth = AuthContext(public_key="tenant-a/project-a", secret_key="", is_org_admin=True)
+    other_tenant_pointer = "tenant-b/project-x/.sessions/sess-abc/aabb1122"
+
+    mock_session = _make_s3_client(
+        pointer_keys=[other_tenant_pointer],
+        key_bodies={other_tenant_pointer: b"tenant-b/project-x/should-not-be-fetched.jsonl"},
+    )
+
+    with patch("llogr.s3.aioboto3.Session", return_value=mock_session):
+        traces = await get_session_traces_s3("sess-abc", auth, settings_s3_only, is_org_admin=True)
+
+    assert traces == []
+
+
+@pytest.mark.asyncio
+async def test_s3_session_traces_super_admin_sees_any_project(settings_s3_only):
+    auth = AuthContext(public_key="tenant/project-a", secret_key="", is_super_admin=True)
+    other_pointer = "other-tenant/other-project/.sessions/sess-abc/aabb1122"
+    other_main_key = "other-tenant/other-project/sess-abc_tr-1_chat_abc12345_20260101T000000Z_aabbccdd.jsonl"
+
+    mock_session = _make_s3_client(
+        pointer_keys=[other_pointer],
+        key_bodies={other_pointer: other_main_key.encode(), other_main_key: _jsonl(GEN_EVENT)},
+    )
+
+    with patch("llogr.s3.aioboto3.Session", return_value=mock_session):
+        traces = await get_session_traces_s3("sess-abc", auth, settings_s3_only, is_super_admin=True)
+
+    assert len(traces) == 1
+    assert traces[0]["event_id"] == "evt-1"
 
 
 @pytest.mark.asyncio

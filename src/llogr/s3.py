@@ -402,13 +402,30 @@ async def get_session_traces_s3(
     session_id: str,
     auth: AuthContext,
     settings: Settings,
+    is_org_admin: bool = False,
+    is_super_admin: bool = False,
 ) -> list[dict]:
     """Return all generation/span events for a single session via pointer index."""
     s3_cfg = settings.s3
 
-    pointer_prefix = f"{auth.public_key}/.sessions/{session_id}/"
+    if is_super_admin:
+        base_prefix = ""
+    elif is_org_admin and "/" in auth.public_key:
+        group = auth.public_key.split("/", 1)[0]
+        base_prefix = f"{group}/"
+    else:
+        base_prefix = f"{auth.public_key}/"
     if s3_cfg.key_prefix:
-        pointer_prefix = f"{s3_cfg.key_prefix.strip('/')}/{pointer_prefix}"
+        base_prefix = f"{s3_cfg.key_prefix.strip('/')}/{base_prefix}"
+
+    marker = f".sessions/{session_id}/"
+    # Tight scope: the pointer dir sits right under the project key, so list it
+    # directly. Broader (org/super admin) scope: the project segment between
+    # base_prefix and ".sessions/" is unknown, so list everything under
+    # base_prefix and filter for the marker (mirrors the cross-org listing
+    # pattern used elsewhere in this module via `_list_prefix`).
+    broad_scope = is_org_admin or is_super_admin
+    list_prefix = base_prefix if broad_scope else f"{base_prefix}{marker}"
 
     boto_session = aioboto3.Session(
         aws_access_key_id=s3_cfg.access_key_id,
@@ -419,9 +436,12 @@ async def get_session_traces_s3(
     async with boto_session.client("s3", endpoint_url=s3_cfg.endpoint, config=_s3_client_config(s3_cfg)) as client:
         paginator = client.get_paginator("list_objects_v2")
         pointer_keys: list[str] = []
-        async for page in paginator.paginate(Bucket=s3_cfg.bucket, Prefix=pointer_prefix):
+        async for page in paginator.paginate(Bucket=s3_cfg.bucket, Prefix=list_prefix):
             for obj in page.get("Contents", []):
-                pointer_keys.append(obj["Key"])
+                key = obj["Key"]
+                if broad_scope and marker not in key:
+                    continue
+                pointer_keys.append(key)
 
         main_keys: list[str] = []
         for pk in pointer_keys:
