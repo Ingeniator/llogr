@@ -35,8 +35,15 @@ _ADK = "gcp.vertex.agent."
 
 # gen_ai.* / gcp.vertex.agent.* keys already promoted to a dedicated body
 # field — excluded from body["metadata"] so they aren't duplicated.
+#
+# Keys are dotted (`gen_ai.operation.name`, `gen_ai.agent.name`,
+# `gen_ai.tool.name`), matching the literal values of the GEN_AI_* constants
+# in opentelemetry.semconv._incubating.attributes.gen_ai_attributes — which is
+# what Google ADK's tracing.py actually imports and sets. An earlier version
+# of this module used underscored keys (`gen_ai.operation_name` etc.), which
+# never matched real ADK spans.
 _GENAI_PROMOTED_KEYS = {
-    _GENAI + "operation_name",
+    _GENAI + "operation.name",
     _GENAI + "system",
     _GENAI + "request.model",
     _GENAI + "request.top_p",
@@ -44,8 +51,9 @@ _GENAI_PROMOTED_KEYS = {
     _GENAI + "response.finish_reasons",
     _GENAI + "usage.input_tokens",
     _GENAI + "usage.output_tokens",
-    _GENAI + "tool_name",
-    _GENAI + "agent_name",
+    _GENAI + "tool.name",
+    _GENAI + "agent.name",
+    _GENAI + "conversation.id",
     _ADK + "llm_request",
     _ADK + "llm_response",
     _ADK + "tool_call_args",
@@ -118,8 +126,14 @@ def _collect_metadata(attrs: dict[str, str], prefix: str) -> dict | None:
 
 
 def _is_genai_dialect(attrs: dict[str, str]) -> bool:
-    """True if a span carries OTel GenAI semantic-convention attributes (e.g. Google ADK)."""
-    return (_GENAI + "operation_name") in attrs or (_GENAI + "system") in attrs
+    """True if a span carries OTel GenAI semantic-convention attributes (e.g. Google ADK).
+
+    `gen_ai.system` is the more reliable of the two signals: ADK's own
+    `call_llm` span never sets `gen_ai.operation.name` at all (only its
+    `invoke_agent` / `execute_tool` spans do), but every ADK-instrumented span
+    sets `gen_ai.system`.
+    """
+    return (_GENAI + "operation.name") in attrs or (_GENAI + "system") in attrs
 
 
 def _span_to_event(span, attrs: dict[str, str], service_name: str | None = None) -> IngestionEvent:
@@ -226,14 +240,14 @@ def _collect_genai_metadata(attrs: dict[str, str]) -> dict | None:
 
 def _span_to_event_genai(span, attrs: dict[str, str]) -> IngestionEvent:
     """Convert a single OTLP span with OTel GenAI attributes (e.g. Google ADK) to an IngestionEvent."""
-    operation = attrs.get(_GENAI + "operation_name", "")
+    operation = attrs.get(_GENAI + "operation.name", "")
     span_id = span.span_id.hex() if span.span_id else uuid.uuid4().hex
     trace_id = span.trace_id.hex() if span.trace_id else uuid.uuid4().hex
     timestamp = _ts_ns_to_iso(span.start_time_unix_nano) if span.start_time_unix_nano else datetime.now(timezone.utc).isoformat()
 
     name = (
-        attrs.get(_GENAI + "tool_name")
-        or attrs.get(_GENAI + "agent_name")
+        attrs.get(_GENAI + "tool.name")
+        or attrs.get(_GENAI + "agent.name")
         or span.name
         or "unknown"
     )
@@ -260,7 +274,13 @@ def _span_to_event_genai(span, attrs: dict[str, str]) -> IngestionEvent:
     )
     body["metadata"] = _collect_genai_metadata(attrs)
 
-    if operation == "generate_content":
+    # ADK's own `call_llm` span never sets `gen_ai.operation.name` at all —
+    # `gen_ai.request.model` is the reliable signal that this is a generation
+    # span there. Other GenAI-instrumented SDKs (e.g. direct Gemini API
+    # clients) do set `operation.name == "generate_content"`, so both are
+    # checked.
+    is_generation = operation == "generate_content" or (_GENAI + "request.model") in attrs
+    if is_generation:
         event_type = "generation-create"
         body["model"] = attrs.get(_GENAI + "request.model")
 
@@ -287,7 +307,10 @@ def _span_to_event_genai(span, attrs: dict[str, str]) -> IngestionEvent:
     else:
         event_type = "span-create"
 
-    body["sessionId"] = attrs.get(_ADK + "session_id")
+    # `gcp.vertex.agent.session_id` is set on ADK's call_llm/tool spans;
+    # `gen_ai.conversation.id` is set on its invoke_agent span, which carries
+    # no gcp.vertex.agent.* attributes at all.
+    body["sessionId"] = attrs.get(_ADK + "session_id") or attrs.get(_GENAI + "conversation.id")
     body["userId"] = attrs.get("user_id")
 
     # parent span

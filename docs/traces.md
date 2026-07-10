@@ -387,27 +387,42 @@ available via the HTTP ingestion path.
 The same `/api/public/otel/v1/traces` endpoint also accepts spans from Google ADK (and
 any other SDK following the [OTel GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/)).
 llogr detects the dialect per span — a span is treated as GenAI/ADK if it carries
-`gen_ai.operation_name` or `gen_ai.system`; otherwise it's parsed as Langfuse. The two
+`gen_ai.operation.name` or `gen_ai.system`; otherwise it's parsed as Langfuse. The two
 dialects can be mixed in the same batch.
 
-Span names: `generate_content {model}` (LLM call), `invoke_agent`, `execute_tool`,
-`compact_events`. Only `generate_content` spans become `generation-create` (with model,
-usage, and params populated) — everything else becomes `span-create`.
+All `gen_ai.*` keys are **dotted** (`gen_ai.operation.name`, `gen_ai.agent.name`,
+`gen_ai.tool.name`), matching the literal values of the `GEN_AI_*` constants in
+`opentelemetry.semconv._incubating.attributes.gen_ai_attributes`, which is what ADK's
+`google/adk/telemetry/tracing.py` actually imports and sets. An underscored form
+(`gen_ai.operation_name` etc.) does not appear on real ADK spans and is not recognized.
+
+Span names actually emitted by ADK: `call_llm` (the LLM-call span — via
+`trace_call_llm`), `invoke_agent` (via `trace_agent_invocation`), `execute_tool` (via
+`trace_tool_call`). Note `call_llm` never sets `gen_ai.operation.name` at all — only
+`gen_ai.system` and `gen_ai.request.model` are guaranteed present on it — so llogr treats
+**presence of `gen_ai.request.model`** as the generation signal, in addition to the
+`operation.name == "generate_content"` value used by other GenAI-instrumented SDKs (e.g.
+direct Gemini API clients, whose span name follows the `generate_content {model}`
+pattern). Anything that isn't classified as a generation becomes `span-create`.
 
 | OTEL attribute | Maps to llogr body field |
 |----------------|--------------------------|
-| `gen_ai.operation_name` | → `event_type` (`generation-create` iff `generate_content`, else `span-create`) |
+| `gen_ai.operation.name` / presence of `gen_ai.request.model` | → `event_type` (`generation-create` if either matches, else `span-create`) |
 | `gen_ai.request.model` | → `body.model` |
 | `gen_ai.request.top_p` / `gen_ai.request.max_tokens` | → `body.modelParameters` |
 | `gen_ai.usage.input_tokens` / `gen_ai.usage.output_tokens` | → `body.usage` (`input`/`output`/`total`) |
 | `gen_ai.response.finish_reasons` (array; first element) | → `body.finishReason` |
-| `gen_ai.tool_name` / `gen_ai.agent_name` | → `body.name` (falls back to span name) |
+| `gen_ai.tool.name` / `gen_ai.agent.name` | → `body.name` (falls back to span name) |
 | `gen_ai.system` | → `body.metadata.provider` |
 | `gcp.vertex.agent.llm_request` / `tool_call_args` / `data` | → `body.input` |
 | `gcp.vertex.agent.llm_response` / `tool_response` | → `body.output` |
-| `gcp.vertex.agent.session_id` | → `body.sessionId` |
+| `gcp.vertex.agent.session_id`, falling back to `gen_ai.conversation.id` | → `body.sessionId` |
 | `user_id` | → `body.userId` |
 | any other `gen_ai.*` / `gcp.vertex.agent.*` key (e.g. `invocation_id`, `event_id`, `tool_call_id`) | → `body.metadata.*` |
+
+`gcp.vertex.agent.session_id` is only set on ADK's `call_llm`/`execute_tool` spans;
+`invoke_agent` carries no `gcp.vertex.agent.*` attributes at all, only
+`gen_ai.conversation.id` — hence the fallback.
 
 **Gaps:** ADK does not emit cost data, so `cost` / `input_cost` / `output_cost` stay `0`
 for ADK-sourced spans — llogr has no model-price table to derive cost from token counts.
