@@ -57,6 +57,42 @@ def test_transform_sets_service_name_resource_attribute():
     assert {"key": "service.name", "value": {"stringValue": "my-service"}} in attrs
 
 
+def test_transform_forwards_full_body_as_span_attributes():
+    """Every field llogr extracted (usage, cost, params, tags, ...) should reach Tempo,
+    not just a hand-picked subset — flattened nested dicts/lists onto dotted keys."""
+    event = IngestionEvent(
+        id="evt-4",
+        timestamp="2026-05-19T10:00:03.000Z",
+        type="generation-create",
+        body={
+            "id": "gen-2",
+            "traceId": "trace-1",
+            "name": "call-llm",
+            "model": "llama-3.2-3b-instruct",
+            "usage": {"input": 12, "output": 34, "total": 46},
+            "costDetails": {"total": 0.002},
+            "modelParameters": {"temperature": 0.7},
+            "tags": ["prod", "eu"],
+            "promptName": "system-prompt",
+            "finishReason": "stop",
+        },
+    )
+
+    payload = transform_to_otlp([event], service_name="llogr")
+    attrs = {a["key"]: a["value"] for a in payload["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["attributes"]}
+
+    assert attrs["usage.input"] == {"intValue": "12"}
+    assert attrs["usage.output"] == {"intValue": "34"}
+    assert attrs["costDetails.total"] == {"doubleValue": 0.002}
+    assert attrs["modelParameters.temperature"] == {"doubleValue": 0.7}
+    assert attrs["tags"] == {"arrayValue": {"values": [{"stringValue": "prod"}, {"stringValue": "eu"}]}}
+    assert attrs["promptName"] == {"stringValue": "system-prompt"}
+    assert attrs["finishReason"] == {"stringValue": "stop"}
+    # structural fields must not be duplicated as attributes
+    assert "traceId" not in attrs
+    assert "name" not in attrs
+
+
 @pytest.mark.asyncio
 async def test_send_to_tempo_posts_otlp_payload(respx_mock):
     cfg = TempoConfig(endpoint="http://tempo:4318/v1/traces", service_name="llogr")

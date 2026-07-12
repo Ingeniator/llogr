@@ -27,6 +27,10 @@ router = APIRouter()
 # Langfuse OTEL attribute keys
 _LF = "langfuse.observation."
 _LF_TRACE = "langfuse.trace."
+# Set by the Langfuse SDK on root-level spans that were stitched onto a
+# NonRecordingSpan to pin a specific trace_id — that placeholder parent is
+# never itself exported, so its span_id must not be used as parentObservationId.
+_LF_AS_ROOT = "langfuse.internal.as_root"
 
 # OTel GenAI semantic-convention attribute keys (Google ADK and other
 # GenAI-instrumented SDKs) — see https://opentelemetry.io/docs/specs/semconv/gen-ai/
@@ -209,8 +213,10 @@ def _span_to_event_langfuse(span, attrs: dict[str, str]) -> IngestionEvent:
     body["statusMessage"] = attrs.get(_LF + "status_message")
     body["version"] = attrs.get("langfuse.version")
 
-    # parent span
-    if span.parent_span_id and span.parent_span_id != b"":
+    # parent span — skip it for spans explicitly marked as trace roots, whose
+    # parent_span_id points at a NonRecordingSpan placeholder that never arrives.
+    is_root = attrs.get(_LF_AS_ROOT) == "True"
+    if not is_root and span.parent_span_id and span.parent_span_id != b"":
         body["parentObservationId"] = span.parent_span_id.hex()
 
     # Strip None values

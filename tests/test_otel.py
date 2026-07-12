@@ -190,6 +190,33 @@ def test_langfuse_dialect_still_works() -> None:
     assert event.body["sessionId"] == "sess-2"
 
 
+def test_langfuse_span_carries_parent_observation_id_by_default() -> None:
+    span = _make_span(
+        "llm-call",
+        {"langfuse.observation.type": "generation"},
+        parent_span_id=b"\x05" * 8,
+    )
+
+    event = _span_to_event(span, _span_attrs(span))
+
+    assert event.body["parentObservationId"] == (b"\x05" * 8).hex()
+
+
+def test_langfuse_root_span_drops_parent_observation_id() -> None:
+    """Spans marked langfuse.internal.as_root carry a parent_span_id pointing at a
+    NonRecordingSpan placeholder the SDK uses to pin the trace_id — that placeholder is
+    never itself exported, so it must not become a dangling parentObservationId."""
+    span = _make_span(
+        "llm-proxy",
+        {"langfuse.observation.type": "generation", "langfuse.internal.as_root": True},
+        parent_span_id=b"\x05" * 8,
+    )
+
+    event = _span_to_event(span, _span_attrs(span))
+
+    assert "parentObservationId" not in event.body
+
+
 def test_resource_service_name_overrides_span_name() -> None:
     span = _make_span("llm-call", {
         "langfuse.observation.type": "generation",

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 from datetime import datetime, timezone
 
 import httpx
@@ -42,12 +43,47 @@ def _unix_nanos(ts: str | None) -> int:
         return int(datetime.now(timezone.utc).timestamp() * 1e9)
 
 
+# Fields already represented structurally elsewhere on the span (name, trace/parent
+# id, timing) — everything else in the body is forwarded as an attribute.
+_STRUCTURAL_KEYS = {"name", "startTime", "endTime", "traceId", "parentObservationId"}
+
+
+def _scalar_value(value) -> dict:
+    if isinstance(value, bool):
+        return {"boolValue": value}
+    if isinstance(value, int):
+        return {"intValue": str(value)}
+    if isinstance(value, float):
+        return {"doubleValue": value}
+    if isinstance(value, str):
+        return {"stringValue": value}
+    return {"stringValue": json.dumps(value, default=str)}
+
+
+def _flatten_into(key: str, value, attrs: list[dict]) -> None:
+    if value is None:
+        return
+    if isinstance(value, dict):
+        for sub_key, sub_value in value.items():
+            _flatten_into(f"{key}.{sub_key}", sub_value, attrs)
+    elif isinstance(value, list) and all(isinstance(v, (str, int, float, bool)) for v in value):
+        attrs.append({
+            "key": key,
+            "value": {"arrayValue": {"values": [_scalar_value(v) for v in value]}},
+        })
+    else:
+        attrs.append({"key": key, "value": _scalar_value(value)})
+
+
 def _attributes(body: dict) -> list[dict]:
-    attrs = []
-    for key in ("id", "sessionId", "userId", "model", "level", "statusMessage"):
-        value = body.get(key)
-        if value is not None:
-            attrs.append({"key": key, "value": {"stringValue": str(value)}})
+    """Forward every field in the ingested event body as a span attribute (flattening
+    nested dicts/lists), so Tempo carries the same data as the other sinks — not just
+    a hand-picked subset."""
+    attrs: list[dict] = []
+    for key, value in body.items():
+        if key in _STRUCTURAL_KEYS:
+            continue
+        _flatten_into(key, value, attrs)
     return attrs
 
 
