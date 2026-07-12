@@ -144,15 +144,19 @@ def _span_to_event(span, attrs: dict[str, str], service_name: str | None = None)
     """Convert a single OTLP span to an IngestionEvent, dispatching on attribute dialect.
 
     `service_name` is the resource-level `service.name` attribute (set once per
-    exporter, e.g. via `OTEL_SERVICE_NAME`) — when present it overwrites `name`
-    unconditionally, the same way the `x-agent-name` ingestion header does for
-    the Langfuse SDK path.
+    exporter, e.g. via `OTEL_SERVICE_NAME`) — it's a process-wide identity (e.g.
+    the proxy service itself), not a per-request one. When a per-span
+    `agent_name` was already resolved into `metadata.agent_name` (the Langfuse
+    dialect path — see langfuse_tracing.py's `metadata["agent_name"]`), that
+    more specific signal wins; `service_name` only fills in as a fallback when
+    no agent_name is known.
     """
     if _is_genai_dialect(attrs):
         event = _span_to_event_genai(span, attrs)
     else:
         event = _span_to_event_langfuse(span, attrs)
-    if service_name:
+    has_agent_name = bool((event.body.get("metadata") or {}).get("agent_name"))
+    if service_name and not has_agent_name:
         event.body["name"] = service_name
     return event
 

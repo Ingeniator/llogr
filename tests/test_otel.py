@@ -247,3 +247,18 @@ def test_no_service_name_leaves_span_name_untouched() -> None:
     event = _span_to_event(span, _span_attrs(span))
 
     assert event.body["name"] == "llm-call"
+
+
+def test_resolved_agent_name_wins_over_resource_service_name() -> None:
+    """A proxy (e.g. yallmp) that shares its request-tracing TracerProvider with
+    its Langfuse exporter stamps every span's resource with its own static
+    service.name. That must not clobber the per-request agent_name the proxy
+    already resolved from X-Agent-Name into span metadata."""
+    span = _make_span("llm-call", {
+        "langfuse.observation.type": "generation",
+        "langfuse.observation.metadata.agent_name": "claude-code",
+    })
+
+    event = _span_to_event(span, _span_attrs(span), service_name="yallmp")
+
+    assert event.body["name"] == "claude-code"
