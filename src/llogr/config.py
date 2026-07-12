@@ -87,6 +87,12 @@ class ClickstreamConfig:
 
 
 @dataclass(frozen=True)
+class TempoConfig:
+    endpoint: str = ""       # OTLP/HTTP traces endpoint, e.g. http://tempo:4318/v1/traces
+    service_name: str = "llogr"
+
+
+@dataclass(frozen=True)
 class ClickHouseConfig:
     url: str = ""
     database: str = "default"
@@ -107,7 +113,7 @@ class ForwardTargetConfig:
 @dataclass(frozen=True)
 class FeaturesConfig:
     # Store backends — where to send events on ingestion
-    # Any combination of: "s3", "clickhouse", "clickstream"
+    # Any combination of: "s3", "clickhouse", "clickstream", "tempo"
     store_backends: tuple[str, ...] = ("s3",)
     # Search
     search_enabled: bool = False
@@ -145,6 +151,7 @@ class Settings:
     server: ServerConfig = ServerConfig()
     features: FeaturesConfig = FeaturesConfig()
     clickhouse: ClickHouseConfig = ClickHouseConfig()
+    tempo: TempoConfig = TempoConfig()
 
 
 def _parse_clickstream_configs(raw: dict) -> tuple[ClickstreamConfig, ...]:
@@ -197,6 +204,7 @@ def load_config(path: str | Path) -> Settings:
             ),
         }),
         clickhouse=ClickHouseConfig(**raw.get("clickhouse", {})),
+        tempo=TempoConfig(**raw.get("tempo", {})),
     )
 
 

@@ -141,6 +141,15 @@ async def ingest(
             if any(not isinstance(r, Exception) for r in results):
                 stored_to.append("clickstream")
 
+    if "tempo" in backends and settings.tempo.endpoint:
+        try:
+            from llogr.tempo import send_to_tempo
+            await send_to_tempo(batch, settings.tempo)
+            stored_to.append("tempo")
+        except Exception:
+            logger.exception("store_tempo_failed")
+            failed.append("tempo")
+
     for target in settings.features.forward:
         from llogr.forward import forward_batch
         asyncio.create_task(forward_batch(batch, auth, target))

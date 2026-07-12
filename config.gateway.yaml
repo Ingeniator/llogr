@@ -22,6 +22,7 @@ features:
   - s3
   - clickhouse
   - clickstream
+  - tempo
   search_enabled: true
   search_backend: "clickhouse"
   agent_whitelist:
@@ -39,3 +40,6 @@ clickhouse:
   table: "llogr_events"
   user: "default"
   password: "clickhouse"
+tempo:
+  endpoint: "http://tempo:4318/v1/traces"
+  service_name: "llogr"

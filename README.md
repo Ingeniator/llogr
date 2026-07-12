@@ -55,6 +55,18 @@ The `clickstream` backend must also be listed under `features.store_backends` to
 
 Set `agents` on an endpoint to only forward batches from those agents (matched against the `X-Agent-Name` request header); omit it to receive every agent's events, as `"primary"` does above.
 
+### Tempo sink
+
+`tempo` in `config.yaml` forwards every ingested batch to a Tempo (or any OTLP/HTTP-compatible) traces endpoint. `trace-create`, `span-create`, `generation-create`, and `event-create` events are converted into OTLP spans (trace/span IDs derived from the Langfuse observation IDs via hashing, since those aren't valid OTLP IDs on their own); score events carry no duration and are dropped rather than forced into a span.
+
+```yaml
+tempo:
+  endpoint: "http://tempo:4318/v1/traces"
+  service_name: "llogr"
+```
+
+The `tempo` backend must also be listed under `features.store_backends` to be active. Forwarding failures are logged and counted in `llogr_tempo_forward_errors_total` but never block ingestion.
+
 ## Endpoints
 
 | Method | Path                       | Description              |
@@ -62,7 +74,7 @@ Set `agents` on an endpoint to only forward batches from those agents (matched a
 | GET    | `/livez`                   | Liveness probe — instant 200, no dependency checks |
 | GET    | `/ready`                   | Readiness probe — checks S3 and ClickHouse; returns 200 or 503 |
 | GET    | `/health`                  | Full health status — JSON with component details |
-| GET    | `/metrics`                 | Prometheus metrics (ingestion counts, S3/clickstream endpoint latency and errors) |
+| GET    | `/metrics`                 | Prometheus metrics (ingestion counts, S3/clickstream/tempo endpoint latency and errors) |
 | POST   | `/api/public/ingestion`    | Ingest events (207)      |
 
 ### Kubernetes probes

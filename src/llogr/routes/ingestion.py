@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Header
 from fastapi.responses import JSONResponse
 
 from llogr.auth import AuthContext, get_auth
-from llogr.models import IngestionBatch, IngestionResponse, IngestionSuccess
+from llogr.models import IngestionBatch, IngestionError, IngestionResponse, IngestionSuccess
 from llogr.processing import ingest
 
 router = APIRouter()
@@ -23,7 +23,8 @@ async def ingest_endpoint(
     session_id = x_session_id or f"fb-{uuid.uuid4().hex[:12]}"
     failed = await ingest(batch.batch, auth, session_id=session_id, request_id=x_request_id, agent_name=x_agent_name)
     if failed:
-        errors = [{"message": f"storage failed: {', '.join(failed)}"}]
+        message = f"storage failed: {', '.join(failed)}"
+        errors = [IngestionError(id=event.id, status=500, message=message) for event in batch.batch]
         return JSONResponse(
             status_code=500,
             content=IngestionResponse(successes=[], errors=errors).model_dump(),

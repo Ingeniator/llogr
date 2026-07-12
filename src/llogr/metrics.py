@@ -27,3 +27,13 @@ CLICKSTREAM_FORWARD_ERRORS = Counter(
     "llogr_clickstream_forward_errors_total",
     "Clickstream forward failures",
 )
+
+TEMPO_FORWARD_SECONDS = Histogram(
+    "llogr_tempo_forward_seconds",
+    "Tempo forward latency in seconds",
+)
+
+TEMPO_FORWARD_ERRORS = Counter(
+    "llogr_tempo_forward_errors_total",
+    "Tempo forward failures",
+)
