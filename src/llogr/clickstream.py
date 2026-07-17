@@ -47,6 +47,7 @@ def transform_to_amplitude(events: list[IngestionEvent], auth: AuthContext, inpu
             },
             "platform": "llogr",
             "app_version": "0.1.0",
+            "app_name": event.body.get("name") or "llogr",
         })
     return amplitude_events
 
