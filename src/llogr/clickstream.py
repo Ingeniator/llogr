@@ -10,7 +10,7 @@ import httpx
 import structlog
 
 from llogr.auth import AuthContext
-from llogr.clickhouse import _extract_prompt_hash
+from llogr.clickhouse import _extract_prompt_hash, _extract_provider
 from llogr.config import ClickstreamConfig
 from llogr.metrics import CLICKSTREAM_FORWARD_ERRORS, CLICKSTREAM_FORWARD_SECONDS
 from llogr.models import IngestionEvent
@@ -48,6 +48,8 @@ def transform_to_amplitude(events: list[IngestionEvent], auth: AuthContext, inpu
             "platform": "llogr",
             "app_version": "0.1.0",
             "app_name": event.body.get("name") or "llogr",
+            "language": event.body.get("model") or _extract_provider(event.body) or "",
+            "session_id": event.body.get("sessionId", "") or "",
         })
     return amplitude_events
 
